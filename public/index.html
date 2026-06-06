@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+  <title>捜索マップ / Search Map</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div id="map"></div>
+
+  <button id="panel-toggle" type="button" aria-label="Toggle panel">☰</button>
+
+  <aside id="panel">
+    <header>
+      <h1>捜索マップ<span>Search Map</span></h1>
+      <p class="sub">みんなが捜索した場所を共有 / Share where people have already searched.</p>
+    </header>
+
+    <section class="block">
+      <h2>GPXをアップロード<span>Upload a track</span></h2>
+      <form id="upload-form">
+        <label>名前 / Track name
+          <input name="name" type="text" maxlength="120" placeholder="例: 北尾根 6/6" required />
+        </label>
+        <div class="row">
+          <label>日付 / Date
+            <input name="date" type="date" />
+          </label>
+          <label>色 / Color
+            <input name="color" type="color" value="#e6194b" />
+          </label>
+        </div>
+        <label>捜索者 / Searcher (optional)
+          <input name="uploader" type="text" maxlength="80" placeholder="名前 or グループ" />
+        </label>
+        <label>メモ / Notes (optional)
+          <textarea name="notes" maxlength="1000" rows="2" placeholder="状況・カバー範囲など"></textarea>
+        </label>
+        <label id="passphrase-field" hidden>合言葉 / Passphrase
+          <input name="passphrase" type="password" autocomplete="off" />
+        </label>
+        <label class="file">GPXファイル / GPX file
+          <input name="gpx" type="file" accept=".gpx,application/gpx+xml,application/xml,text/xml" required />
+        </label>
+        <button type="submit" id="upload-btn">アップロード / Upload</button>
+        <p id="upload-msg" class="msg" role="status"></p>
+      </form>
+    </section>
+
+    <section class="block">
+      <h2>捜索ログ<span>Tracks (<span id="count">0</span>)</span></h2>
+      <ul id="track-list"></ul>
+      <p class="hint">線が重なっている場所＝複数回捜索済み。空白＝未捜索の可能性。<br>
+        Overlapping lines = searched repeatedly. Blank areas = likely gaps.</p>
+    </section>
+
+    <footer>
+      <p>地図: <a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank" rel="noopener">地理院タイル (GSI Japan)</a></p>
+    </footer>
+  </aside>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+          integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script src="https://cdn.jsdelivr.net/npm/leaflet-gpx@1.7.0/gpx.min.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

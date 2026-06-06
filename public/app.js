@@ -202,7 +202,7 @@ form.addEventListener('submit', async (e) => {
 // ---- 3D view ---------------------------------------------------------------
 document.getElementById('btn-3d').addEventListener('click', (e) => {
   e.preventDefault();
-  window.open('/terrain.html', '_blank', 'noopener');
+  window.location.href = '/terrain.html';
 });
 
 // ---- Mobile panel toggle + go ---------------------------------------------

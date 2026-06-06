@@ -24,8 +24,8 @@ function setStatus(t, err) { statusEl.textContent = t; statusEl.className = err 
 const qp = new URLSearchParams(location.search);
 let west = 135.77;
 let east = 135.88;
-let south = 34.985;
-let north = 35.085;
+let south = 35.00;
+let north = 35.075;
 if (qp.get('dynamic') === '1') {
   const qw = parseFloat(qp.get('w'));
   const qs = parseFloat(qp.get('s'));
@@ -37,7 +37,7 @@ if (qp.get('dynamic') === '1') {
 }
 // Add extra north/south context so the 3D slab does not cut off nearby ridges/tracks.
 {
-  const padLat = Math.max(0.012, (north - south) * 0.28);
+  const padLat = Math.max(0.008, (north - south) * 0.18);
   south -= padLat;
   north += padLat;
 }

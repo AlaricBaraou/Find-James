@@ -8,10 +8,10 @@ const ATTR =
   '<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank" rel="noopener">地理院タイル GSI Japan</a>';
 
 const TILES = [
+  { url: 'https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg', name: '写真 Satellite', max: 18, default: true },
   { url: 'https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png', name: '標準 Standard', max: 18 },
   { url: 'https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png', name: '淡色 Pale', max: 18 },
   { url: 'https://cyberjapandata.gsi.go.jp/xyz/relief/{z}/{x}/{y}.png', name: '色別標高 Relief', max: 15 },
-  { url: 'https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg', name: '写真 Satellite', max: 18 },
 ];
 
 // Our colour code. For now every track is red; later we can branch by
@@ -22,10 +22,10 @@ function colorFor(t) { return (t && t.color) || TRACK_COLORS.default; }
 const map = L.map('map', { zoomControl: true }).setView([35.055, 135.82], 12); // Mt. Hiei
 
 const baseLayers = {};
-TILES.forEach((t, i) => {
+TILES.forEach((t) => {
   const layer = L.tileLayer(t.url, { maxZoom: 18, maxNativeZoom: t.max, attribution: ATTR });
   baseLayers[t.name] = layer;
-  if (i === 0) layer.addTo(map);
+  if (t.default) layer.addTo(map);
 });
 L.control.layers(baseLayers, {}, { collapsed: true, position: 'topright' }).addTo(map);
 

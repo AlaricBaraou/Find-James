@@ -174,7 +174,11 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x0b0e14);
 scene.fog = new THREE.Fog(0x0b0e14, 4000, 16000);
 
-const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 1, 60000);
+const worldWidth = lon2x(east) - lon2x(west);
+const worldDepth = lat2y(north) - lat2y(south);
+const worldSize = Math.max(worldWidth, worldDepth);
+
+const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 1, Math.max(60000, worldSize * 8));
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.maxPolarAngle = Math.PI * 0.495; // don't go under the ground
@@ -183,10 +187,6 @@ scene.add(new THREE.AmbientLight(0xffffff, 0.55));
 const sun = new THREE.DirectionalLight(0xffffff, 1.0);
 sun.position.set(-1, 1.4, -0.8);
 scene.add(sun);
-
-const worldWidth = lon2x(east) - lon2x(west);
-const worldDepth = lat2y(north) - lat2y(south);
-const worldSize = Math.max(worldWidth, worldDepth);
 
 let exag = 1.7;
 let terrainMesh = null;
@@ -258,7 +258,11 @@ function worldPos(lon, lat, lift) {
 // ===========================================================================
 // Tracks overlay
 // ===========================================================================
-const trackObjs = []; // { line, pts: [[lon,lat]], planned }
+const TRACK_RADIUS = Math.max(10, Math.min(45, worldSize / 550));
+const TRACK_LIFT = Math.max(18, TRACK_RADIUS * 2.2);
+const DASH_SIZE = Math.max(70, worldSize / 120);
+const DASH_GAP = DASH_SIZE * 0.75;
+const trackObjs = []; // { mesh, pts: [[lon,lat]], planned, color }
 
 function parseGpx(xml) {
   const doc = new DOMParser().parseFromString(xml, 'application/xml');
@@ -288,29 +292,80 @@ async function loadTracks() {
       if (pts.length < 2) continue;
       const planned = t.kind === 'planned';
       const color = planned && t.status === 'claimed' ? new THREE.Color(0x4363d8) : trackColor(t, i);
-      const geo = new THREE.BufferGeometry();
-      geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pts.length * 3), 3));
-      const mat = planned
-        ? new THREE.LineDashedMaterial({ color, dashSize: 30, gapSize: 20, linewidth: 2 })
-        : new THREE.LineBasicMaterial({ color, linewidth: 2 });
-      const line = new THREE.Line(geo, mat);
-      const obj = { line, pts, planned };
+      const obj = { mesh: null, pts, planned, color };
       setTrackHeights(obj);
-      if (planned) line.computeLineDistances();
-      scene.add(line);
       trackObjs.push(obj);
     } catch (_) {}
   }
 }
 
-function setTrackHeights(obj) {
-  const arr = obj.line.geometry.attributes.position.array;
-  for (let k = 0; k < obj.pts.length; k++) {
-    const w = worldPos(obj.pts[k][0], obj.pts[k][1], 12 * exag);
-    arr[k * 3] = w.x; arr[k * 3 + 1] = w.y; arr[k * 3 + 2] = w.z;
+function disposeObject(obj) {
+  obj.traverse((child) => {
+    if (child.geometry) child.geometry.dispose();
+    if (child.material) child.material.dispose();
+  });
+}
+
+function lineCurvePath(points) {
+  const path = new THREE.CurvePath();
+  for (let i = 1; i < points.length; i++) {
+    path.add(new THREE.LineCurve3(points[i - 1], points[i]));
   }
-  obj.line.geometry.attributes.position.needsUpdate = true;
-  if (obj.planned) obj.line.computeLineDistances();
+  return path;
+}
+
+function cylinderBetween(a, b, radius, material) {
+  const delta = b.clone().sub(a);
+  const len = delta.length();
+  if (len < 0.01) return null;
+  const geo = new THREE.CylinderGeometry(radius, radius, len, 8, 1, false);
+  const mesh = new THREE.Mesh(geo, material);
+  mesh.position.copy(a).add(b).multiplyScalar(0.5);
+  mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), delta.normalize());
+  return mesh;
+}
+
+function buildTrackMesh(points, color, planned) {
+  const mat = new THREE.MeshBasicMaterial({
+    color,
+    depthTest: true,
+    depthWrite: false,
+  });
+  if (!planned) {
+    const path = lineCurvePath(points);
+    const segments = Math.max(16, Math.min(900, points.length * 4));
+    return new THREE.Mesh(new THREE.TubeGeometry(path, segments, TRACK_RADIUS, 8, false), mat);
+  }
+
+  const group = new THREE.Group();
+  for (let i = 1; i < points.length; i++) {
+    const start = points[i - 1];
+    const end = points[i];
+    const seg = end.clone().sub(start);
+    const len = seg.length();
+    if (len < 0.01) continue;
+    const dir = seg.clone().normalize();
+    for (let at = 0; at < len; at += DASH_SIZE + DASH_GAP) {
+      const a = start.clone().addScaledVector(dir, at);
+      const b = start.clone().addScaledVector(dir, Math.min(at + DASH_SIZE, len));
+      const dash = cylinderBetween(a, b, TRACK_RADIUS, mat);
+      if (dash) group.add(dash);
+    }
+  }
+  return group;
+}
+
+function setTrackHeights(obj) {
+  const points = [];
+  for (let k = 0; k < obj.pts.length; k++) {
+    points.push(worldPos(obj.pts[k][0], obj.pts[k][1], TRACK_LIFT));
+  }
+  if (obj.mesh) {
+    scene.remove(obj.mesh);
+    disposeObject(obj.mesh);
+  }
+  obj.mesh = buildTrackMesh(points, obj.color, obj.planned);
+  scene.add(obj.mesh);
 }
 
 function updateTrackHeights() { trackObjs.forEach(setTrackHeights); }
@@ -319,8 +374,17 @@ function updateTrackHeights() { trackObjs.forEach(setTrackHeights); }
 // Camera framing + loop
 // ===========================================================================
 function frameCamera() {
+  let radius = worldSize * 0.75;
+  if (terrainMesh) {
+    terrainMesh.geometry.computeBoundingSphere();
+    if (terrainMesh.geometry.boundingSphere) radius = Math.max(radius, terrainMesh.geometry.boundingSphere.radius);
+  }
+  camera.near = Math.max(0.5, radius / 12000);
+  camera.far = Math.max(60000, radius * 8);
   controls.target.set(0, 0, 0);
-  camera.position.set(0, worldSize * 0.7, worldSize * 0.9);
+  controls.minDistance = Math.max(20, radius * 0.03);
+  controls.maxDistance = radius * 6;
+  camera.position.set(0, radius * 1.15, radius * 1.95);
   camera.updateProjectionMatrix();
   controls.update();
 }

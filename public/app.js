@@ -75,7 +75,17 @@ function el(tag, props, children) {
 
 function buildPopup(t) {
   const wrap = el('div', {}, []);
-  wrap.appendChild(el('div', { className: 'pname' }, [t.name || 'Untitled']));
+  // When a source link is provided, it replaces the generic name as the title.
+  // Only http(s) URLs become clickable links (guards against javascript:/data:).
+  if (t.source && /^https?:\/\//i.test(t.source)) {
+    wrap.appendChild(el('div', { className: 'pname' }, [
+      el('a', { href: t.source, target: '_blank', rel: 'noopener noreferrer' }, ['🔗 ' + t.source]),
+    ]));
+  } else if (t.source) {
+    wrap.appendChild(el('div', { className: 'pname' }, [t.source]));
+  } else {
+    wrap.appendChild(el('div', { className: 'pname' }, [t.name || 'Untitled']));
+  }
   if (t.date) wrap.appendChild(el('div', { className: 'pmeta' }, [t.date]));
   if (t.notes) wrap.appendChild(el('div', {}, [t.notes]));
   // Email is only present in admin mode (#admin=...).

@@ -252,6 +252,7 @@ app.post('/api/tracks', uploadLimiter, upload.single('gpx'), async (req, res) =>
     date,
     email: clampStr(req.body.email, 120),
     notes: clampStr(req.body.notes, 1000),
+    source: clampStr(req.body.source, 300), // link to the original activity (e.g. YAMAP/Strava)
     color: null, // colour is decided client-side by our colour code
     createdAt,
   };

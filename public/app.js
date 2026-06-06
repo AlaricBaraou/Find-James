@@ -220,6 +220,14 @@ async function loadConfig() {
     const cfg = await (await fetch('/api/config')).json();
     uploadGated = cfg.uploadGated;
     if (uploadGated) document.getElementById('passphrase-field').hidden = false;
+    if (cfg.search && Number.isFinite(cfg.search.lat) && Number.isFinite(cfg.search.lon)) {
+      // Frame the configured search area, unless tracks have already auto-fit.
+      if (fitPending) map.setView([cfg.search.lat, cfg.search.lon], cfg.search.zoom || 12);
+      if (cfg.search.name) {
+        const h1 = document.querySelector('#panel header h1 span');
+        if (h1) h1.textContent = cfg.search.name;
+      }
+    }
   } catch (_) {}
 }
 if (adminToken) document.getElementById('recommended-field').hidden = false;

@@ -23,6 +23,13 @@ const UPLOAD_PASSPHRASE = process.env.UPLOAD_PASSPHRASE || '';
 // Required to delete entries. If unset, deletion is disabled entirely.
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || '';
 
+// Default map framing for the search area. Override at deploy time — no code
+// change needed. Defaults to central Kyoto until the real area is set.
+const SEARCH_LAT = parseFloat(process.env.SEARCH_LAT || '35.0116');
+const SEARCH_LON = parseFloat(process.env.SEARCH_LON || '135.7681');
+const SEARCH_ZOOM = parseInt(process.env.SEARCH_ZOOM || '12', 10);
+const SEARCH_AREA_NAME = process.env.SEARCH_AREA_NAME || '';
+
 fs.mkdirSync(GPX_DIR, { recursive: true });
 store.init(DATA_DIR);
 
@@ -71,6 +78,12 @@ app.get('/api/config', (req, res) => {
   res.json({
     uploadGated: Boolean(UPLOAD_PASSPHRASE),
     maxFileBytes: MAX_FILE_BYTES,
+    search: {
+      lat: SEARCH_LAT,
+      lon: SEARCH_LON,
+      zoom: SEARCH_ZOOM,
+      name: SEARCH_AREA_NAME,
+    },
   });
 });
 

@@ -43,6 +43,9 @@ All optional — see `.env.example`.
 | `PORT` | `3000` | Port to listen on |
 | `DATA_DIR` | `./data` | Where GPX files + metadata live — **use a persistent path in production** |
 | `MAX_FILE_BYTES` | `10485760` (10 MB) | Max upload size |
+| `SEARCH_LAT` / `SEARCH_LON` | Kyoto | Default map center for the search area |
+| `SEARCH_ZOOM` | `12` | Default zoom |
+| `SEARCH_AREA_NAME` | _(unset)_ | Label shown in the panel header |
 | `UPLOAD_PASSPHRASE` | _(unset)_ | If set, uploaders must enter this. Leave unset for fully-open uploads |
 | `ADMIN_TOKEN` | _(unset)_ | Required to delete tracks. If unset, deletion is disabled |
 

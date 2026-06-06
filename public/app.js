@@ -31,6 +31,31 @@ L.control.layers(baseLayers, {}, { collapsed: true, position: 'topright' }).addT
 const group = L.featureGroup().addTo(map);
 let fitPending = true;
 
+// Public reports place the last confirmed sighting around Yamashina Station /
+// Yamashina area on May 29. This is an approximate public marker, not an exact
+// police-confirmed trail coordinate.
+const LAST_SEEN = {
+  lat: 34.99234,
+  lon: 135.81708,
+  date: '2026-05-29',
+  label: 'Last seen / 最終目撃',
+};
+L.marker([LAST_SEEN.lat, LAST_SEEN.lon], {
+  icon: L.divIcon({
+    className: 'last-seen-marker',
+    html: '<span class="pin"></span><span class="label">' + LAST_SEEN.label + '<br>' + LAST_SEEN.date + '</span>',
+    iconSize: [154, 42],
+    iconAnchor: [12, 36],
+  }),
+})
+  .bindPopup(
+    '<strong>最終目撃情報 / Last reported sighting</strong><br>' +
+    '2026年5月29日 / May 29, 2026<br>' +
+    '山科駅周辺 / Yamashina Station area<br>' +
+    '<span class="pmeta">報道・CCTV情報に基づく概略位置です。Approximate public marker based on reporting/CCTV references.</span>'
+  )
+  .addTo(map);
+
 // Admin mode (delete buttons) via URL hash: #admin=YOUR_TOKEN
 let adminToken = null;
 (function () {
@@ -174,13 +199,10 @@ form.addEventListener('submit', async (e) => {
   }
 });
 
-// ---- 3D view: hand the current map bounds to the terrain viewer ------------
+// ---- 3D view ---------------------------------------------------------------
 document.getElementById('btn-3d').addEventListener('click', (e) => {
   e.preventDefault();
-  const b = map.getBounds();
-  const q = 'w=' + b.getWest().toFixed(5) + '&s=' + b.getSouth().toFixed(5) +
-            '&e=' + b.getEast().toFixed(5) + '&n=' + b.getNorth().toFixed(5);
-  window.open('/terrain.html?' + q, '_blank', 'noopener');
+  window.open('/terrain.html', '_blank', 'noopener');
 });
 
 // ---- Mobile panel toggle + go ---------------------------------------------

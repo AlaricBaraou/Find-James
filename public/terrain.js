@@ -17,20 +17,27 @@ const DEG = Math.PI / 180;
 const statusEl = document.getElementById('status');
 function setStatus(t, err) { statusEl.textContent = t; statusEl.className = err ? 'err' : ''; }
 
-// ---- Query params (bbox from the 2D map) ----------------------------------
+// ---- Fixed 3D bounds -------------------------------------------------------
+// Keep the 3D terrain extent stable so tile count and coverage are predictable.
+// Add ?dynamic=1&w=...&s=...&e=...&n=... only for debugging viewport-specific
+// terrain slices.
 const qp = new URLSearchParams(location.search);
-let west = parseFloat(qp.get('w'));
-let south = parseFloat(qp.get('s'));
-let east = parseFloat(qp.get('e'));
-let north = parseFloat(qp.get('n'));
-if (![west, south, east, north].every(Number.isFinite)) {
-  // Default to the Mount Hiei massif (Kyoto ⟷ Lake Biwa ridge).
-  west = 135.77; east = 135.88; south = 35.01; north = 35.10;
+let west = 135.77;
+let east = 135.88;
+let south = 34.985;
+let north = 35.085;
+if (qp.get('dynamic') === '1') {
+  const qw = parseFloat(qp.get('w'));
+  const qs = parseFloat(qp.get('s'));
+  const qe = parseFloat(qp.get('e'));
+  const qn = parseFloat(qp.get('n'));
+  if ([qw, qs, qe, qn].every(Number.isFinite)) {
+    west = qw; south = qs; east = qe; north = qn;
+  }
 }
-// The 2D map bounds can be tight around the current viewport. Add extra
-// north/south context so the 3D slab does not cut off nearby ridges/tracks.
+// Add extra north/south context so the 3D slab does not cut off nearby ridges/tracks.
 {
-  const padLat = Math.max(0.015, (north - south) * 0.35);
+  const padLat = Math.max(0.012, (north - south) * 0.28);
   south -= padLat;
   north += padLat;
 }

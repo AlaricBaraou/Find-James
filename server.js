@@ -63,6 +63,11 @@ const uploadLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+// Bound the bandwidth-heavy endpoints per IP so traffic can't run up the bill.
+// Generous enough for real use: a single 3D view pulls ~40-60 tiles.
+const tileLimiter = rateLimit({ windowMs: 5 * 60 * 1000, max: 2000, standardHeaders: true, legacyHeaders: false });
+const readLimiter = rateLimit({ windowMs: 5 * 60 * 1000, max: 600, standardHeaders: true, legacyHeaders: false });
+
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: MAX_FILE_BYTES, files: 1 },
@@ -144,7 +149,7 @@ app.get('/api/tracks', (req, res) => {
   res.json(store.list().map((t) => publicTrack(t, admin)));
 });
 
-app.get('/api/tracks/:id/gpx', (req, res) => {
+app.get('/api/tracks/:id/gpx', readLimiter, (req, res) => {
   const t = store.get(req.params.id);
   if (!t) return res.status(404).json({ error: 'not found' });
   const fp = path.join(GPX_DIR, t.file);
@@ -349,7 +354,7 @@ const GSI_LAYERS = {
   dem5a: 'txt', // 5m mesh, z<=15 (limited coverage)
 };
 
-app.get('/api/gsi/:layer/:z/:x/:y', async (req, res) => {
+app.get('/api/gsi/:layer/:z/:x/:y', tileLimiter, async (req, res) => {
   const { layer, z, x, y } = req.params;
   const ext = GSI_LAYERS[layer];
   if (!ext) return res.status(400).json({ error: 'unknown layer' });

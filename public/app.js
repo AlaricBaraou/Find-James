@@ -53,9 +53,14 @@ function el(tag, props, children) {
 function buildPopup(t) {
   const wrap = el('div', {}, []);
   wrap.appendChild(el('div', { className: 'pname' }, [t.name || 'Untitled']));
-  const bits = [t.date, t.uploader].filter(Boolean);
-  if (bits.length) wrap.appendChild(el('div', { className: 'pmeta' }, [bits.join(' · ')]));
+  if (t.date) wrap.appendChild(el('div', { className: 'pmeta' }, [t.date]));
   if (t.notes) wrap.appendChild(el('div', {}, [t.notes]));
+  // Email is only present in admin mode (#admin=...).
+  if (t.email) {
+    wrap.appendChild(el('div', { className: 'pmeta' }, [
+      '✉ ', el('a', { href: 'mailto:' + t.email }, [t.email]),
+    ]));
+  }
   return wrap;
 }
 
@@ -86,7 +91,7 @@ function listItem(t, color, gpxLayer) {
   dot.style.background = color;
 
   const name = el('span', { className: 'name' }, [t.name || 'Untitled']);
-  const sub = el('span', { className: 'date' }, [[t.date, t.uploader].filter(Boolean).join(' · ')]);
+  const sub = el('span', { className: 'date' }, [t.date || '']);
   const meta = el('div', { className: 'meta' }, [name, sub]);
   meta.addEventListener('click', () => {
     try { map.fitBounds(gpxLayer.getBounds().pad(0.2)); } catch (_) {}
@@ -114,7 +119,9 @@ function addTrack(t, idx) {
 }
 
 async function loadTracks() {
-  const res = await fetch('/api/tracks');
+  const headers = {};
+  if (adminToken) headers['x-admin-token'] = adminToken; // include emails in admin mode
+  const res = await fetch('/api/tracks', { headers });
   const tracks = await res.json();
   document.getElementById('track-list').innerHTML = '';
   group.clearLayers();
@@ -155,9 +162,7 @@ form.addEventListener('submit', async (e) => {
     const res = await fetch('/api/tracks', { method: 'POST', body: data, headers });
     if (res.ok) {
       msg.textContent = 'アップロード完了 / Uploaded ✓'; msg.className = 'msg ok';
-      const color = form.color.value;
       form.reset();
-      form.color.value = color;
       fitPending = false;
       loadTracks();
     } else {

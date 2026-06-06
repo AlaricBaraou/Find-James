@@ -25,20 +25,10 @@
 
     <section class="block">
       <h2>GPXをアップロード<span>Upload a track</span></h2>
+      <p class="hint" style="margin-top:0">名前と日付はGPXから自動取得します。<br>Name &amp; date are read from the GPX automatically.</p>
       <form id="upload-form">
-        <label>名前 / Track name
-          <input name="name" type="text" maxlength="120" placeholder="例: 北尾根 6/6" required />
-        </label>
-        <div class="row">
-          <label>日付 / Date
-            <input name="date" type="date" />
-          </label>
-          <label>色 / Color
-            <input name="color" type="color" value="#e6194b" />
-          </label>
-        </div>
-        <label>捜索者 / Searcher (optional)
-          <input name="uploader" type="text" maxlength="80" placeholder="名前 or グループ" />
+        <label>メール / Email (optional)
+          <input name="email" type="email" maxlength="120" placeholder="連絡先 / for the organisers to reach you" autocomplete="email" />
         </label>
         <label>メモ / Notes (optional)
           <textarea name="notes" maxlength="1000" rows="2" placeholder="状況・カバー範囲など"></textarea>

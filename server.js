@@ -5,6 +5,8 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const multer = require('multer');
 const cookieParser = require('cookie-parser');
+const { DOMParser } = require('@xmldom/xmldom');
+const togeojson = require('@tmcw/togeojson');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
@@ -83,6 +85,42 @@ function isTrue(v) {
   return v === 'true' || v === '1' || v === true;
 }
 
+// Format an ISO timestamp as a YYYY-MM-DD date in Japan time (the searches are
+// in Japan; GPX times are usually UTC, so the local date can differ by a day).
+function jstDate(iso) {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  try {
+    return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Tokyo' }).format(d);
+  } catch (_) {
+    return iso.slice(0, 10);
+  }
+}
+
+// Parse a GPX buffer with @tmcw/togeojson and pull out a display name and the
+// first track timestamp (as a JST date). Returns {} on unparseable input.
+function extractGpxMeta(buf) {
+  let name = '';
+  let time = '';
+  try {
+    const dom = new DOMParser({ onError: () => {} }).parseFromString(buf.toString('utf8'), 'text/xml');
+    const geo = togeojson.gpx(dom);
+    for (const f of geo.features || []) {
+      const p = f.properties || {};
+      if (!name && p.name) name = String(p.name);
+      if (!time) {
+        if (p.time) time = p.time;
+        else if (p.coordinateProperties && p.coordinateProperties.times) {
+          const flat = [p.coordinateProperties.times].flat(Infinity).filter(Boolean);
+          if (flat.length) time = flat[0];
+        }
+      }
+      if (name && time) break;
+    }
+  } catch (_) {}
+  return { name: name.trim().slice(0, 120), date: time ? jstDate(time) : '' };
+}
+
 // ---- API ------------------------------------------------------------------
 
 // Public config for the frontend (does not leak secrets).
@@ -102,7 +140,8 @@ app.get('/api/config', (req, res) => {
 });
 
 app.get('/api/tracks', (req, res) => {
-  res.json(store.list().map(publicTrack));
+  const admin = isAdmin(req);
+  res.json(store.list().map((t) => publicTrack(t, admin)));
 });
 
 app.get('/api/tracks/:id/gpx', (req, res) => {
@@ -131,25 +170,25 @@ app.post('/api/tracks', uploadLimiter, upload.single('gpx'), (req, res) => {
   const file = id + '.gpx';
   fs.writeFileSync(path.join(GPX_DIR, file), req.file.buffer);
 
+  // Trust the GPX for the name and date; the form only supplies email + notes.
+  const meta = extractGpxMeta(req.file.buffer);
+  const createdAt = new Date().toISOString();
   const color = /^#[0-9a-fA-F]{6}$/.test(req.body.color || '') ? req.body.color : null;
   const kind = req.body.kind === 'planned' ? 'planned' : 'searched';
   const rec = {
     id,
     file,
     kind,
-    name: clampStr(req.body.name, 120) || 'Untitled track',
-    date: clampStr(req.body.date, 40),
-    uploader: clampStr(req.body.uploader, 80),
+    name: meta.name || (meta.date ? '捜索 / Search ' + meta.date : 'トラック / Track'),
+    date: meta.date || jstDate(createdAt),
+    email: clampStr(req.body.email, 120),
     notes: clampStr(req.body.notes, 1000),
     color,
-    createdAt: new Date().toISOString(),
+    createdAt,
   };
   // Attach a verified owner when the uploader is signed in (enables contact).
   const owner = auth.getUser(req);
-  if (owner) {
-    rec.ownerId = owner.id;
-    if (!rec.uploader) rec.uploader = owner.nickname;
-  }
+  if (owner) rec.ownerId = owner.id;
   if (kind === 'planned') {
     rec.status = 'open'; // open -> claimed -> completed
     rec.claimedBy = '';
@@ -158,14 +197,16 @@ app.post('/api/tracks', uploadLimiter, upload.single('gpx'), (req, res) => {
     rec.recommended = isAdmin(req) && isTrue(req.body.recommended);
   }
   store.add(rec);
-  res.status(201).json(publicTrack(rec));
+  res.status(201).json(publicTrack(rec, true));
 });
 
-// Strip internal fields (ownerId/claimedById) before sending tracks to clients,
-// and expose a simple `contactable` flag.
-function publicTrack(t) {
-  const { ownerId, claimedById, ...rest } = t;
-  return { ...rest, contactable: Boolean(ownerId || claimedById) };
+// Strip internal fields before sending tracks to clients. Email is only
+// included for admin requests (so it isn't scraped from the public list).
+function publicTrack(t, includeEmail) {
+  const { ownerId, claimedById, email, ...rest } = t;
+  const out = { ...rest, contactable: Boolean(ownerId || claimedById) };
+  if (includeEmail && email) out.email = email;
+  return out;
 }
 
 // ---- Planned-route lifecycle (claim / release / complete) -----------------

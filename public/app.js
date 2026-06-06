@@ -1,7 +1,8 @@
 'use strict';
 
 // ===========================================================================
-// Base maps: GSI (Geospatial Information Authority of Japan) tiles
+// Upload + display only. Base maps: GSI (Geospatial Information Authority of
+// Japan) tiles. Tracks are uploaded as GPX and drawn on the map.
 // ===========================================================================
 const ATTR =
   '<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank" rel="noopener">地理院タイル GSI Japan</a>';
@@ -29,28 +30,17 @@ TILES.forEach((t, i) => {
 });
 L.control.layers(baseLayers, {}, { collapsed: true, position: 'topright' }).addTo(map);
 
-const group = L.featureGroup().addTo(map); // searched + planned route layers
+const group = L.featureGroup().addTo(map);
 let fitPending = true;
 
-// Auth + contact state (populated from /api/config and /api/auth/me).
-let me = null;
-let authEnabled = false;
-let groupChatUrl = '';
-
-// Admin mode via URL hash: #admin=YOUR_TOKEN
+// Admin mode (delete buttons) via URL hash: #admin=YOUR_TOKEN
 let adminToken = null;
 (function () {
   const m = (location.hash || '').match(/admin=([^&]+)/);
   if (m) adminToken = decodeURIComponent(m[1]);
 })();
 
-// Remember the searcher's name across claims/uploads.
-function rememberName(n) { try { localStorage.setItem('searcherName', n); } catch (_) {} }
-function recalledName() { try { return localStorage.getItem('searcherName') || ''; } catch (_) { return ''; } }
-
-// ===========================================================================
-// Helpers
-// ===========================================================================
+// ---- Helpers --------------------------------------------------------------
 function el(tag, props, children) {
   const node = document.createElement(tag);
   if (props) Object.assign(node, props);
@@ -60,55 +50,11 @@ function el(tag, props, children) {
   return node;
 }
 
-function escapeXml(s) {
-  return String(s).replace(/[<>&'"]/g, (c) =>
-    ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' }[c])
-  );
-}
-
-function coordsToGpx(coords, name) {
-  // coords: array of [lon, lat, (ele)]
-  const pts = coords
-    .map((c) => {
-      const ele = c[2] != null ? '<ele>' + c[2] + '</ele>' : '';
-      return '<trkpt lat="' + c[1] + '" lon="' + c[0] + '">' + ele + '</trkpt>';
-    })
-    .join('');
-  return (
-    '<?xml version="1.0" encoding="UTF-8"?>' +
-    '<gpx version="1.1" creator="search-map" xmlns="http://www.topografix.com/GPX/1/1">' +
-    '<trk><name>' + escapeXml(name) + '</name><trkseg>' + pts + '</trkseg></trk></gpx>'
-  );
-}
-
-function styleFor(t, color) {
-  if (t.kind === 'planned') {
-    if (t.status === 'completed') return { color: t.color || '#3cb44b', weight: 4, opacity: 0.55 };
-    if (t.status === 'claimed') return { color: '#4363d8', weight: 5, opacity: 0.95, dashArray: '6,8' };
-    return { color: t.color || '#f5a623', weight: t.recommended ? 6 : 4, opacity: 0.95, dashArray: '6,8' };
-  }
-  return { color: color, weight: 4, opacity: 0.75 };
-}
-
-function statusLabel(t) {
-  if (t.kind !== 'planned') return '';
-  if (t.status === 'completed') return '✓ 完了 done' + (t.completedBy ? ' · ' + t.completedBy : '');
-  if (t.status === 'claimed') return '担当 claimed · ' + (t.claimedBy || '?');
-  return '未割当 open';
-}
-
-// ===========================================================================
-// Rendering tracks
-// ===========================================================================
 function buildPopup(t) {
   const wrap = el('div', {}, []);
-  const title = (t.recommended ? '★ ' : '') + (t.name || 'Untitled');
-  wrap.appendChild(el('div', { className: 'pname' }, [title]));
-  const bits = [];
-  if (t.kind === 'planned') bits.push(statusLabel(t));
-  if (t.date) bits.push(t.date);
-  if (t.uploader) bits.push(t.uploader);
-  if (bits.filter(Boolean).length) wrap.appendChild(el('div', { className: 'pmeta' }, [bits.filter(Boolean).join(' · ')]));
+  wrap.appendChild(el('div', { className: 'pname' }, [t.name || 'Untitled']));
+  const bits = [t.date, t.uploader].filter(Boolean);
+  if (bits.length) wrap.appendChild(el('div', { className: 'pmeta' }, [bits.join(' · ')]));
   if (t.notes) wrap.appendChild(el('div', {}, [t.notes]));
   return wrap;
 }
@@ -116,7 +62,7 @@ function buildPopup(t) {
 function makeGpxLayer(t, color) {
   const gpx = new L.GPX('/api/tracks/' + t.id + '/gpx', {
     async: true,
-    polyline_options: styleFor(t, color),
+    polyline_options: { color: color, weight: 4, opacity: 0.75 },
     marker_options: { startIconUrl: '', endIconUrl: '', shadowUrl: '' },
   });
   gpx.bindPopup(buildPopup(t));
@@ -129,7 +75,7 @@ function makeGpxLayer(t, color) {
   return gpx;
 }
 
-function listItem(t, color, gpxLayer, opts) {
+function listItem(t, color, gpxLayer) {
   const cb = el('input', { type: 'checkbox', checked: true });
   cb.addEventListener('change', () => {
     if (cb.checked) gpxLayer.addTo(group);
@@ -137,23 +83,16 @@ function listItem(t, color, gpxLayer, opts) {
   });
 
   const dot = el('span', { className: 'dot' });
-  dot.style.background = styleFor(t, color).color;
-  if (t.kind === 'planned') dot.classList.add('planned');
+  dot.style.background = color;
 
-  const nameTxt = (t.recommended ? '★ ' : '') + (t.name || 'Untitled');
-  const name = el('span', { className: 'name' }, [nameTxt]);
-  const sub = el('span', { className: 'date' }, [
-    [t.kind === 'planned' ? statusLabel(t) : t.date, t.uploader].filter(Boolean).join(' · '),
-  ]);
+  const name = el('span', { className: 'name' }, [t.name || 'Untitled']);
+  const sub = el('span', { className: 'date' }, [[t.date, t.uploader].filter(Boolean).join(' · ')]);
   const meta = el('div', { className: 'meta' }, [name, sub]);
   meta.addEventListener('click', () => {
     try { map.fitBounds(gpxLayer.getBounds().pad(0.2)); } catch (_) {}
   });
 
-  const item = el('li', { className: 'track-item' + (t.recommended ? ' recommended' : '') }, [cb, dot, meta]);
-
-  if (opts && opts.planned) appendPlannedActions(item, t);
-  appendContact(item, t);
+  const item = el('li', { className: 'track-item' }, [cb, dot, meta]);
 
   if (adminToken) {
     const del = el('button', { className: 'del', title: 'Delete', textContent: '✕' });
@@ -168,84 +107,39 @@ function listItem(t, color, gpxLayer, opts) {
   return item;
 }
 
-function appendPlannedActions(item, t) {
-  const box = el('div', { className: 'claim-actions' });
-  async function post(action, body) {
-    const res = await fetch('/api/tracks/' + t.id + '/' + action, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body || {}),
-    });
-    if (res.ok) loadTracks();
-    else {
-      const e = await res.json().catch(() => ({}));
-      alert(e.error || (action + ' failed'));
-    }
-  }
-  if (t.status === 'open') {
-    const b = el('button', { className: 'claim', textContent: '担当する / Claim' });
-    b.addEventListener('click', () => {
-      const by = prompt('お名前 / Your name:', recalledName());
-      if (by) { rememberName(by); post('claim', { by }); }
-    });
-    box.appendChild(b);
-  } else if (t.status === 'claimed') {
-    const done = el('button', { className: 'done', textContent: '完了 / Done' });
-    done.addEventListener('click', () => post('complete', { by: t.claimedBy }));
-    const rel = el('button', { className: 'release', textContent: '解除 / Release' });
-    rel.addEventListener('click', () => post('release', {}));
-    box.appendChild(done); box.appendChild(rel);
-  }
-  if (box.childNodes.length) item.appendChild(box);
-}
-
 function addTrack(t, idx) {
   const color = t.color || PALETTE[idx % PALETTE.length];
   const gpx = makeGpxLayer(t, color);
-  const planned = t.kind === 'planned';
-  const list = document.getElementById(planned ? 'planned-list' : 'track-list');
-  list.appendChild(listItem(t, color, gpx, { planned }));
+  document.getElementById('track-list').appendChild(listItem(t, color, gpx));
 }
 
 async function loadTracks() {
   const res = await fetch('/api/tracks');
   const tracks = await res.json();
   document.getElementById('track-list').innerHTML = '';
-  document.getElementById('planned-list').innerHTML = '';
   group.clearLayers();
-  document.getElementById('count').textContent = tracks.filter((t) => t.kind !== 'planned').length;
+  document.getElementById('count').textContent = tracks.length;
   tracks.forEach(addTrack);
 }
 
-// ===========================================================================
-// Upload form
-// ===========================================================================
+// ---- Config (search-area framing + optional upload passphrase) -------------
 let uploadGated = false;
 async function loadConfig() {
   try {
     const cfg = await (await fetch('/api/config')).json();
     uploadGated = cfg.uploadGated;
-    authEnabled = Boolean(cfg.authEnabled);
-    groupChatUrl = cfg.groupChatUrl || '';
     if (uploadGated) document.getElementById('passphrase-field').hidden = false;
-    if (groupChatUrl) {
-      const chat = document.getElementById('btn-chat');
-      chat.href = groupChatUrl;
-      chat.hidden = false;
-    }
     if (cfg.search && Number.isFinite(cfg.search.lat) && Number.isFinite(cfg.search.lon)) {
-      // Frame the configured search area, unless tracks have already auto-fit.
       if (fitPending) map.setView([cfg.search.lat, cfg.search.lon], cfg.search.zoom || 12);
       if (cfg.search.name) {
         const lbl = document.getElementById('area-label');
         if (lbl) lbl.textContent = '📍 ' + cfg.search.name;
       }
     }
-    renderAuthbar();
   } catch (_) {}
 }
-if (adminToken) document.getElementById('recommended-field').hidden = false;
 
+// ---- Upload form ----------------------------------------------------------
 const form = document.getElementById('upload-form');
 const msg = document.getElementById('upload-msg');
 const btn = document.getElementById('upload-btn');
@@ -277,151 +171,7 @@ form.addEventListener('submit', async (e) => {
   }
 });
 
-// ===========================================================================
-// Route planner (click waypoints -> snap to trails via BRouter -> save)
-// ===========================================================================
-const planner = {
-  active: false,
-  waypoints: [],   // L.LatLng
-  markers: [],     // L.CircleMarker
-  preview: null,   // L.Polyline
-  resolved: [],    // [[lon,lat,ele?], ...] final route geometry
-};
-
-const plannerBar = document.getElementById('planner-bar');
-const planStatus = document.getElementById('plan-status');
-
-function setPlanStatus(txt) { planStatus.textContent = txt; }
-
-function enterPlanner() {
-  planner.active = true;
-  plannerBar.hidden = false;
-  document.body.classList.add('planning');
-  map.getContainer().style.cursor = 'crosshair';
-  setPlanStatus('地図をクリックして点を追加 / Click the map to add points');
-}
-
-function exitPlanner() {
-  planner.active = false;
-  plannerBar.hidden = true;
-  document.body.classList.remove('planning');
-  map.getContainer().style.cursor = '';
-  clearPlanner();
-}
-
-function clearPlanner() {
-  planner.waypoints = [];
-  planner.markers.forEach((m) => map.removeLayer(m));
-  planner.markers = [];
-  if (planner.preview) { map.removeLayer(planner.preview); planner.preview = null; }
-  planner.resolved = [];
-  if (planner.active) setPlanStatus('地図をクリックして点を追加 / Click the map to add points');
-}
-
-map.on('click', (e) => {
-  if (!planner.active) return;
-  planner.waypoints.push(e.latlng);
-  const m = L.circleMarker(e.latlng, { radius: 5, color: '#ff00aa', weight: 2, fillOpacity: 1 }).addTo(map);
-  planner.markers.push(m);
-  recomputeRoute();
-});
-
-async function snapToTrails(latlngs) {
-  const lonlats = latlngs.map((p) => p.lng.toFixed(6) + ',' + p.lat.toFixed(6)).join('|');
-  const url =
-    'https://brouter.de/brouter?lonlats=' + lonlats +
-    '&profile=hiking-beta&alternativeidx=0&format=geojson';
-  const res = await fetch(url);
-  if (!res.ok) throw new Error('BRouter ' + res.status);
-  const gj = await res.json();
-  const coords = gj.features && gj.features[0] && gj.features[0].geometry.coordinates;
-  if (!coords || !coords.length) throw new Error('no route');
-  return coords; // [[lon,lat,(ele)], ...]
-}
-
-function drawPreview(latlngsForLine, resolvedCoords) {
-  if (planner.preview) map.removeLayer(planner.preview);
-  planner.preview = L.polyline(latlngsForLine, {
-    color: '#ff00aa', weight: 4, opacity: 0.9, dashArray: '4,6',
-  }).addTo(map);
-  planner.resolved = resolvedCoords;
-  // distance
-  let d = 0;
-  for (let i = 1; i < latlngsForLine.length; i++) d += latlngsForLine[i - 1].distanceTo(latlngsForLine[i]);
-  setPlanStatus((d / 1000).toFixed(2) + ' km · ' + planner.waypoints.length + ' pts');
-}
-
-let recomputeSeq = 0;
-async function recomputeRoute() {
-  if (planner.waypoints.length < 2) {
-    if (planner.preview) { map.removeLayer(planner.preview); planner.preview = null; }
-    planner.resolved = planner.waypoints.map((p) => [p.lng, p.lat]);
-    return;
-  }
-  const snap = document.getElementById('snap-trails').checked;
-  const seq = ++recomputeSeq;
-  if (!snap) {
-    drawPreview(planner.waypoints.slice(), planner.waypoints.map((p) => [p.lng, p.lat]));
-    return;
-  }
-  setPlanStatus('trail探索中… / routing…');
-  try {
-    const coords = await snapToTrails(planner.waypoints);
-    if (seq !== recomputeSeq) return; // a newer request superseded this one
-    const latlngs = coords.map((c) => L.latLng(c[1], c[0]));
-    drawPreview(latlngs, coords);
-  } catch (err) {
-    if (seq !== recomputeSeq) return;
-    // Fall back to straight segments so planning still works off-trail / offline.
-    drawPreview(planner.waypoints.slice(), planner.waypoints.map((p) => [p.lng, p.lat]));
-    setPlanStatus('trail探索失敗→直線 / routing failed, straight line');
-  }
-}
-
-document.getElementById('btn-plan').addEventListener('click', () => {
-  if (planner.active) exitPlanner(); else enterPlanner();
-});
-document.getElementById('plan-cancel').addEventListener('click', exitPlanner);
-document.getElementById('plan-clear').addEventListener('click', clearPlanner);
-document.getElementById('plan-undo').addEventListener('click', () => {
-  planner.waypoints.pop();
-  const m = planner.markers.pop();
-  if (m) map.removeLayer(m);
-  recomputeRoute();
-});
-document.getElementById('snap-trails').addEventListener('change', recomputeRoute);
-
-document.getElementById('plan-save').addEventListener('click', async () => {
-  if (planner.resolved.length < 2) { alert('2点以上をクリックしてください / Add at least 2 points.'); return; }
-  const name = prompt('ルート名 / Route name:', '');
-  if (!name) return;
-  const gpx = coordsToGpx(planner.resolved, name);
-  const data = new FormData();
-  data.append('kind', 'planned');
-  data.append('name', name);
-  data.append('color', '#f5a623');
-  data.append('gpx', new Blob([gpx], { type: 'application/gpx+xml' }), 'route.gpx');
-  const headers = {};
-  if (adminToken) {
-    headers['x-admin-token'] = adminToken;
-    if (confirm('★ 推奨ルートにしますか？ / Mark as recommended?')) data.append('recommended', 'true');
-  }
-  if (uploadGated) {
-    const pass = prompt('合言葉 / Passphrase:');
-    if (pass) data.append('passphrase', pass);
-  }
-  setPlanStatus('保存中… / saving…');
-  const res = await fetch('/api/tracks', { method: 'POST', body: data, headers });
-  if (res.ok) { exitPlanner(); fitPending = false; loadTracks(); }
-  else {
-    const e = await res.json().catch(() => ({}));
-    alert(e.error || 'Save failed'); setPlanStatus('保存失敗 / save failed');
-  }
-});
-
-// ===========================================================================
-// 3D view: hand the current map bounds to the terrain viewer
-// ===========================================================================
+// ---- 3D view: hand the current map bounds to the terrain viewer ------------
 document.getElementById('btn-3d').addEventListener('click', (e) => {
   e.preventDefault();
   const b = map.getBounds();
@@ -430,179 +180,9 @@ document.getElementById('btn-3d').addEventListener('click', (e) => {
   window.open('/terrain.html?' + q, '_blank', 'noopener');
 });
 
-// ===========================================================================
-// Mobile panel toggle + go
-// ===========================================================================
+// ---- Mobile panel toggle + go ---------------------------------------------
 document.getElementById('panel-toggle').addEventListener('click', () => {
   document.body.classList.toggle('panel-open');
 });
 
-// ===========================================================================
-// Authentication (magic-link) + per-route contact threads
-// ===========================================================================
-const modal = document.getElementById('modal');
-const modalBody = document.getElementById('modal-body');
-function openModal(node) { modalBody.innerHTML = ''; modalBody.appendChild(node); modal.hidden = false; }
-function closeModal() { modal.hidden = true; modalBody.innerHTML = ''; }
-document.getElementById('modal-x').addEventListener('click', closeModal);
-modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !modal.hidden) closeModal(); });
-
-function renderAuthbar() {
-  const bar = document.getElementById('authbar');
-  bar.innerHTML = '';
-  if (!authEnabled) { bar.hidden = true; return; }
-  bar.hidden = false;
-  if (me) {
-    const who = el('span', { className: 'who-label', title: '表示名を変更 / change name' }, ['👤 ' + (me.nickname || '名前未設定 / set name')]);
-    who.addEventListener('click', openNickname);
-    const inbox = el('button', { className: 'link-btn' }, ['📨 受信箱 / Inbox']);
-    inbox.addEventListener('click', openInbox);
-    const out = el('button', { className: 'link-btn' }, ['ログアウト / Logout']);
-    out.addEventListener('click', async () => {
-      await fetch('/api/auth/logout', { method: 'POST' });
-      me = null; renderAuthbar(); loadTracks();
-    });
-    bar.append(who, inbox, out);
-  } else {
-    const inb = el('button', { className: 'modal-primary small' }, ['ログイン / Sign in']);
-    inb.addEventListener('click', openSignin);
-    bar.appendChild(inb);
-  }
-}
-
-async function loadMe() {
-  try { me = (await (await fetch('/api/auth/me')).json()).user; } catch (_) { me = null; }
-  renderAuthbar();
-  if (me && !me.hasNickname) openNickname();
-  if (location.search.includes('setname')) history.replaceState({}, '', location.pathname);
-}
-
-function openSignin() {
-  const email = el('input', { type: 'email', placeholder: 'you@example.com', className: 'modal-input', autocomplete: 'email' });
-  const status = el('p', { className: 'msg' });
-  const send = el('button', { className: 'modal-primary' }, ['ログインリンクを送る / Send sign-in link']);
-  send.addEventListener('click', async () => {
-    status.className = 'msg'; status.textContent = '送信中… / sending…';
-    try {
-      const res = await fetch('/api/auth/request', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.value.trim() }),
-      });
-      const d = await res.json().catch(() => ({}));
-      if (res.ok) {
-        status.className = 'msg ok';
-        if (d.devLink) {
-          status.textContent = '';
-          status.appendChild(el('a', { href: d.devLink }, ['（開発用）クリックしてログイン / Dev: click to sign in']));
-        } else {
-          status.textContent = 'メールを確認してください / Check your email for the link.';
-        }
-      } else { status.className = 'msg err'; status.textContent = d.error || 'Failed.'; }
-    } catch (_) { status.className = 'msg err'; status.textContent = 'Network error.'; }
-  });
-  email.addEventListener('keydown', (e) => { if (e.key === 'Enter') send.click(); });
-  openModal(el('div', {}, [
-    el('h3', {}, ['ログイン / Sign in']),
-    el('p', { className: 'muted' }, ['匿名でOK。メールはログインリンク専用で、他の人には表示されません。 Anonymous — your email is only used to send the link and is never shown to others.']),
-    email, send, status,
-  ]));
-  email.focus();
-}
-
-function openNickname() {
-  const input = el('input', { type: 'text', maxLength: 40, className: 'modal-input', placeholder: '例: 北班A / e.g. North-team', value: (me && me.nickname) || '' });
-  const status = el('p', { className: 'msg' });
-  const save = el('button', { className: 'modal-primary' }, ['保存 / Save']);
-  save.addEventListener('click', async () => {
-    try {
-      const res = await fetch('/api/auth/nickname', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nickname: input.value.trim() }),
-      });
-      const d = await res.json().catch(() => ({}));
-      if (res.ok) { me.nickname = d.nickname; me.hasNickname = true; renderAuthbar(); closeModal(); loadTracks(); }
-      else { status.className = 'msg err'; status.textContent = d.error || 'Failed.'; }
-    } catch (_) { status.className = 'msg err'; status.textContent = 'Network error.'; }
-  });
-  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') save.click(); });
-  openModal(el('div', {}, [
-    el('h3', {}, ['表示名 / Display name']),
-    el('p', { className: 'muted' }, ['地図上で表示される匿名のニックネーム。 The anonymous nickname others will see on the map.']),
-    input, save, status,
-  ]));
-  input.focus();
-}
-
-function appendContact(item, t) {
-  if (!authEnabled) return;
-  let box = item.querySelector('.claim-actions');
-  if (!box) { box = el('div', { className: 'claim-actions' }); item.appendChild(box); }
-  const c = el('button', { className: 'contact' }, ['連絡 / Contact']);
-  c.addEventListener('click', () => { if (!me) openSignin(); else openThread(t); });
-  box.appendChild(c);
-}
-
-async function openThread(t) {
-  const list = el('div', { className: 'thread' });
-  const ta = el('textarea', { className: 'modal-input', rows: 2, placeholder: 'メッセージ / Message…' });
-  const status = el('p', { className: 'msg' });
-  const send = el('button', { className: 'modal-primary' }, ['送信 / Send']);
-  async function refresh() {
-    const res = await fetch('/api/tracks/' + t.id + '/messages');
-    if (res.status === 401) { closeModal(); openSignin(); return; }
-    const d = await res.json();
-    list.innerHTML = '';
-    if (!d.messages.length) list.appendChild(el('p', { className: 'muted' }, ['まだメッセージはありません / No messages yet.']));
-    d.messages.forEach((m) => {
-      list.appendChild(el('div', { className: 'msg-row' + (m.mine ? ' mine' : '') }, [
-        el('span', { className: 'who' }, [m.mine ? 'あなた / You' : m.fromNick]),
-        el('div', { className: 'mbody' }, [m.body]),
-      ]));
-    });
-    list.scrollTop = list.scrollHeight;
-  }
-  send.addEventListener('click', async () => {
-    const body = ta.value.trim(); if (!body) return;
-    send.disabled = true; status.textContent = '';
-    try {
-      const res = await fetch('/api/tracks/' + t.id + '/messages', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body }),
-      });
-      if (res.ok) { ta.value = ''; refresh(); }
-      else { const e = await res.json().catch(() => ({})); status.className = 'msg err'; status.textContent = e.error || 'Failed.'; }
-    } catch (_) { status.className = 'msg err'; status.textContent = 'Network error.'; }
-    finally { send.disabled = false; }
-  });
-  openModal(el('div', {}, [
-    el('h3', {}, ['連絡 / Contact — ' + (t.name || '')]),
-    el('p', { className: 'muted' }, ['このルートの担当者・作成者に届きます。電話番号やメールは共有されません。 Reaches the route owner/claimer. No phone or email is shared.']),
-    list, ta, send, status,
-  ]));
-  refresh();
-}
-
-async function openInbox() {
-  const res = await fetch('/api/inbox');
-  if (res.status === 401) { openSignin(); return; }
-  const d = await res.json();
-  const list = el('div', { className: 'thread' });
-  if (!d.threads.length) list.appendChild(el('p', { className: 'muted' }, ['メッセージはありません / No messages.']));
-  d.threads.forEach((th) => {
-    const row = el('button', { className: 'inbox-row' }, [
-      el('div', { className: 'name' }, [th.name + '  (' + th.count + ')']),
-      el('div', { className: 'mbody' }, [th.lastNick + ': ' + th.lastBody]),
-    ]);
-    row.addEventListener('click', () => openThread({ id: th.trackId, name: th.name }));
-    list.appendChild(row);
-  });
-  openModal(el('div', {}, [el('h3', {}, ['📨 受信箱 / Inbox']), list]));
-}
-
-// ===========================================================================
-// Boot
-// ===========================================================================
-loadConfig().then(() => {
-  loadTracks();
-  loadMe();
-});
+loadConfig().then(loadTracks);

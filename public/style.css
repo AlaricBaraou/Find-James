@@ -68,6 +68,8 @@ html, body {
   font-weight: 400;
   color: var(--muted);
 }
+.area { margin: 2px 0 6px; font-size: 13px; font-weight: 600; color: var(--accent); }
+.area:empty { display: none; }
 .sub { margin: 0 0 12px; font-size: 12px; color: var(--muted); }
 
 .block {

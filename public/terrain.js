@@ -24,8 +24,8 @@ let south = parseFloat(qp.get('s'));
 let east = parseFloat(qp.get('e'));
 let north = parseFloat(qp.get('n'));
 if (![west, south, east, north].every(Number.isFinite)) {
-  // Default to a Kyoto-area box.
-  west = 135.72; east = 135.85; south = 34.97; north = 35.06;
+  // Default to the Mount Hiei massif (Kyoto ⟷ Lake Biwa ridge).
+  west = 135.77; east = 135.88; south = 35.01; north = 35.10;
 }
 // Guard against absurdly large boxes (keep tile counts sane).
 if (east - west > 0.6) { const c = (east + west) / 2; west = c - 0.3; east = c + 0.3; }

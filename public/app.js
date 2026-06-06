@@ -19,7 +19,7 @@ const PALETTE = [
   '#42d4f4', '#bfef45', '#fabed4', '#dcbeff', '#aaffc3',
 ];
 
-const map = L.map('map', { zoomControl: true }).setView([35.0116, 135.7681], 11);
+const map = L.map('map', { zoomControl: true }).setView([35.055, 135.82], 12); // Mt. Hiei
 
 const baseLayers = {};
 TILES.forEach((t, i) => {
@@ -224,8 +224,8 @@ async function loadConfig() {
       // Frame the configured search area, unless tracks have already auto-fit.
       if (fitPending) map.setView([cfg.search.lat, cfg.search.lon], cfg.search.zoom || 12);
       if (cfg.search.name) {
-        const h1 = document.querySelector('#panel header h1 span');
-        if (h1) h1.textContent = cfg.search.name;
+        const lbl = document.getElementById('area-label');
+        if (lbl) lbl.textContent = '📍 ' + cfg.search.name;
       }
     }
   } catch (_) {}

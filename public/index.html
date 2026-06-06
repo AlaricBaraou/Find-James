@@ -13,15 +13,34 @@
 
   <button id="panel-toggle" type="button" aria-label="Toggle panel">☰</button>
 
+  <!-- Planner toolbar (hidden until planning mode) -->
+  <div id="planner-bar" hidden>
+    <span class="pb-title">ルート計画 / Plan route</span>
+    <label class="pb-snap"><input type="checkbox" id="snap-trails" checked /> trailに沿う / snap to trails</label>
+    <button type="button" id="plan-undo">元に戻す / Undo</button>
+    <button type="button" id="plan-clear">クリア / Clear</button>
+    <button type="button" id="plan-save" class="primary">保存 / Save route</button>
+    <button type="button" id="plan-cancel">キャンセル / Cancel</button>
+    <span id="plan-status" class="pb-status"></span>
+  </div>
+
   <aside id="panel">
     <header>
       <h1>捜索マップ<span>Search Map</span></h1>
       <p class="sub">みんなが捜索した場所を共有 / Share where people have already searched.</p>
+      <div class="actions">
+        <button type="button" id="btn-plan">＋ ルート計画 / Plan a route</button>
+        <a id="btn-3d" href="/terrain.html" target="_blank" rel="noopener">⛰ 3D表示 / 3D view</a>
+      </div>
     </header>
 
     <section class="block">
-      <h2>GPXをアップロード<span>Upload a track</span></h2>
+      <h2>アップロード<span>Upload a track</span></h2>
       <form id="upload-form">
+        <div class="kind-toggle">
+          <label><input type="radio" name="kind" value="searched" checked /> 捜索済み / Searched</label>
+          <label><input type="radio" name="kind" value="planned" /> 計画 / Planned</label>
+        </div>
         <label>名前 / Track name
           <input name="name" type="text" maxlength="120" placeholder="例: 北尾根 6/6" required />
         </label>
@@ -39,6 +58,9 @@
         <label>メモ / Notes (optional)
           <textarea name="notes" maxlength="1000" rows="2" placeholder="状況・カバー範囲など"></textarea>
         </label>
+        <label id="recommended-field" class="check" hidden>
+          <input type="checkbox" name="recommended" /> ★ 推奨ルート / Recommended (admin)
+        </label>
         <label id="passphrase-field" hidden>合言葉 / Passphrase
           <input name="passphrase" type="password" autocomplete="off" />
         </label>
@@ -51,14 +73,22 @@
     </section>
 
     <section class="block">
-      <h2>捜索ログ<span>Tracks (<span id="count">0</span>)</span></h2>
-      <ul id="track-list"></ul>
-      <p class="hint">線が重なっている場所＝複数回捜索済み。空白＝未捜索の可能性。<br>
-        Overlapping lines = searched repeatedly. Blank areas = likely gaps.</p>
+      <h2>計画ルート<span>Planned routes</span></h2>
+      <ul id="planned-list" class="track-list"></ul>
+      <p class="hint">「担当する」を押すと他の人に重複を知らせます。<br>
+        Claim a route so others don't duplicate it.</p>
+    </section>
+
+    <section class="block">
+      <h2>捜索ログ<span>Searched (<span id="count">0</span>)</span></h2>
+      <ul id="track-list" class="track-list"></ul>
+      <p class="hint">線が重なる場所＝複数回捜索済み。空白＝未捜索の可能性。<br>
+        Overlaps = searched repeatedly. Blanks = likely gaps.</p>
     </section>
 
     <footer>
-      <p>地図: <a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank" rel="noopener">地理院タイル (GSI Japan)</a></p>
+      <p>地図: <a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank" rel="noopener">地理院タイル (GSI Japan)</a><br>
+      ルート探索 / routing: <a href="https://brouter.de/" target="_blank" rel="noopener">BRouter</a> · OSM</p>
     </footer>
   </aside>
 

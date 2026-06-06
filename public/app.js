@@ -1,6 +1,8 @@
 'use strict';
 
-// ---- Base maps: GSI (Geospatial Information Authority of Japan) tiles -------
+// ===========================================================================
+// Base maps: GSI (Geospatial Information Authority of Japan) tiles
+// ===========================================================================
 const ATTR =
   '<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank" rel="noopener">地理院タイル GSI Japan</a>';
 
@@ -11,14 +13,12 @@ const TILES = [
   { url: 'https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg', name: '写真 Satellite', max: 18 },
 ];
 
-// Distinguishable default colors when an uploader did not pick one.
 const PALETTE = [
   '#e6194b', '#3cb44b', '#4363d8', '#f58231', '#911eb4',
   '#469990', '#f032e6', '#9a6324', '#000075', '#808000',
-  '#e6194b', '#42d4f4', '#bfef45', '#fabed4', '#dcbeff',
+  '#42d4f4', '#bfef45', '#fabed4', '#dcbeff', '#aaffc3',
 ];
 
-// Default view: Kyoto. The map auto-fits to uploaded tracks once they load.
 const map = L.map('map', { zoomControl: true }).setView([35.0116, 135.7681], 11);
 
 const baseLayers = {};
@@ -29,16 +29,23 @@ TILES.forEach((t, i) => {
 });
 L.control.layers(baseLayers, {}, { collapsed: true, position: 'topright' }).addTo(map);
 
-const group = L.featureGroup().addTo(map);
+const group = L.featureGroup().addTo(map); // searched + planned route layers
+let fitPending = true;
 
-// ---- Admin mode (delete buttons) via URL hash: #admin=YOUR_TOKEN -----------
+// Admin mode via URL hash: #admin=YOUR_TOKEN
 let adminToken = null;
 (function () {
   const m = (location.hash || '').match(/admin=([^&]+)/);
   if (m) adminToken = decodeURIComponent(m[1]);
 })();
 
-// ---- Helpers --------------------------------------------------------------
+// Remember the searcher's name across claims/uploads.
+function rememberName(n) { try { localStorage.setItem('searcherName', n); } catch (_) {} }
+function recalledName() { try { return localStorage.getItem('searcherName') || ''; } catch (_) { return ''; } }
+
+// ===========================================================================
+// Helpers
+// ===========================================================================
 function el(tag, props, children) {
   const node = document.createElement(tag);
   if (props) Object.assign(node, props);
@@ -48,18 +55,76 @@ function el(tag, props, children) {
   return node;
 }
 
+function escapeXml(s) {
+  return String(s).replace(/[<>&'"]/g, (c) =>
+    ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' }[c])
+  );
+}
+
+function coordsToGpx(coords, name) {
+  // coords: array of [lon, lat, (ele)]
+  const pts = coords
+    .map((c) => {
+      const ele = c[2] != null ? '<ele>' + c[2] + '</ele>' : '';
+      return '<trkpt lat="' + c[1] + '" lon="' + c[0] + '">' + ele + '</trkpt>';
+    })
+    .join('');
+  return (
+    '<?xml version="1.0" encoding="UTF-8"?>' +
+    '<gpx version="1.1" creator="search-map" xmlns="http://www.topografix.com/GPX/1/1">' +
+    '<trk><name>' + escapeXml(name) + '</name><trkseg>' + pts + '</trkseg></trk></gpx>'
+  );
+}
+
+function styleFor(t, color) {
+  if (t.kind === 'planned') {
+    if (t.status === 'completed') return { color: t.color || '#3cb44b', weight: 4, opacity: 0.55 };
+    if (t.status === 'claimed') return { color: '#4363d8', weight: 5, opacity: 0.95, dashArray: '6,8' };
+    return { color: t.color || '#f5a623', weight: t.recommended ? 6 : 4, opacity: 0.95, dashArray: '6,8' };
+  }
+  return { color: color, weight: 4, opacity: 0.75 };
+}
+
+function statusLabel(t) {
+  if (t.kind !== 'planned') return '';
+  if (t.status === 'completed') return '✓ 完了 done' + (t.completedBy ? ' · ' + t.completedBy : '');
+  if (t.status === 'claimed') return '担当 claimed · ' + (t.claimedBy || '?');
+  return '未割当 open';
+}
+
+// ===========================================================================
+// Rendering tracks
+// ===========================================================================
 function buildPopup(t) {
   const wrap = el('div', {}, []);
-  wrap.appendChild(el('div', { className: 'pname' }, [t.name || 'Untitled']));
+  const title = (t.recommended ? '★ ' : '') + (t.name || 'Untitled');
+  wrap.appendChild(el('div', { className: 'pname' }, [title]));
   const bits = [];
+  if (t.kind === 'planned') bits.push(statusLabel(t));
   if (t.date) bits.push(t.date);
   if (t.uploader) bits.push(t.uploader);
-  if (bits.length) wrap.appendChild(el('div', { className: 'pmeta' }, [bits.join(' · ')]));
+  if (bits.filter(Boolean).length) wrap.appendChild(el('div', { className: 'pmeta' }, [bits.filter(Boolean).join(' · ')]));
   if (t.notes) wrap.appendChild(el('div', {}, [t.notes]));
   return wrap;
 }
 
-function buildListItem(t, color, gpxLayer) {
+function makeGpxLayer(t, color) {
+  const gpx = new L.GPX('/api/tracks/' + t.id + '/gpx', {
+    async: true,
+    polyline_options: styleFor(t, color),
+    marker_options: { startIconUrl: '', endIconUrl: '', shadowUrl: '' },
+  });
+  gpx.bindPopup(buildPopup(t));
+  gpx.on('loaded', () => {
+    gpx.addTo(group);
+    if (fitPending) {
+      try { map.fitBounds(group.getBounds().pad(0.15)); } catch (_) {}
+    }
+  });
+  return gpx;
+}
+
+function listItem(t, color, gpxLayer, opts) {
   const cb = el('input', { type: 'checkbox', checked: true });
   cb.addEventListener('change', () => {
     if (cb.checked) gpxLayer.addTo(group);
@@ -67,78 +132,89 @@ function buildListItem(t, color, gpxLayer) {
   });
 
   const dot = el('span', { className: 'dot' });
-  dot.style.background = color;
+  dot.style.background = styleFor(t, color).color;
+  if (t.kind === 'planned') dot.classList.add('planned');
 
-  const name = el('span', { className: 'name' }, [t.name || 'Untitled']);
-  const date = el('span', { className: 'date' }, [
-    [t.date, t.uploader].filter(Boolean).join(' · '),
+  const nameTxt = (t.recommended ? '★ ' : '') + (t.name || 'Untitled');
+  const name = el('span', { className: 'name' }, [nameTxt]);
+  const sub = el('span', { className: 'date' }, [
+    [t.kind === 'planned' ? statusLabel(t) : t.date, t.uploader].filter(Boolean).join(' · '),
   ]);
-  const meta = el('div', { className: 'meta' }, [name, date]);
+  const meta = el('div', { className: 'meta' }, [name, sub]);
   meta.addEventListener('click', () => {
-    try {
-      map.fitBounds(gpxLayer.getBounds().pad(0.2));
-    } catch (_) {}
+    try { map.fitBounds(gpxLayer.getBounds().pad(0.2)); } catch (_) {}
   });
 
-  const item = el('li', { className: 'track-item' }, [cb, dot, meta]);
+  const item = el('li', { className: 'track-item' + (t.recommended ? ' recommended' : '') }, [cb, dot, meta]);
+
+  if (opts && opts.planned) appendPlannedActions(item, t);
 
   if (adminToken) {
     const del = el('button', { className: 'del', title: 'Delete', textContent: '✕' });
     del.addEventListener('click', async () => {
       if (!confirm('Delete "' + (t.name || 'this track') + '"?')) return;
-      const res = await fetch('/api/tracks/' + t.id, {
-        method: 'DELETE',
-        headers: { 'x-admin-token': adminToken },
-      });
-      if (res.ok) {
-        group.removeLayer(gpxLayer);
-        item.remove();
-        const c = document.getElementById('count');
-        c.textContent = Math.max(0, parseInt(c.textContent, 10) - 1);
-      } else {
-        alert('Delete failed (' + res.status + ')');
-      }
+      const res = await fetch('/api/tracks/' + t.id, { method: 'DELETE', headers: { 'x-admin-token': adminToken } });
+      if (res.ok) { group.removeLayer(gpxLayer); loadTracks(); }
+      else alert('Delete failed (' + res.status + ')');
     });
     item.appendChild(del);
   }
   return item;
 }
 
-let fitPending = true;
+function appendPlannedActions(item, t) {
+  const box = el('div', { className: 'claim-actions' });
+  async function post(action, body) {
+    const res = await fetch('/api/tracks/' + t.id + '/' + action, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body || {}),
+    });
+    if (res.ok) loadTracks();
+    else {
+      const e = await res.json().catch(() => ({}));
+      alert(e.error || (action + ' failed'));
+    }
+  }
+  if (t.status === 'open') {
+    const b = el('button', { className: 'claim', textContent: '担当する / Claim' });
+    b.addEventListener('click', () => {
+      const by = prompt('お名前 / Your name:', recalledName());
+      if (by) { rememberName(by); post('claim', { by }); }
+    });
+    box.appendChild(b);
+  } else if (t.status === 'claimed') {
+    const done = el('button', { className: 'done', textContent: '完了 / Done' });
+    done.addEventListener('click', () => post('complete', { by: t.claimedBy }));
+    const rel = el('button', { className: 'release', textContent: '解除 / Release' });
+    rel.addEventListener('click', () => post('release', {}));
+    box.appendChild(done); box.appendChild(rel);
+  }
+  if (box.childNodes.length) item.appendChild(box);
+}
 
 function addTrack(t, idx) {
   const color = t.color || PALETTE[idx % PALETTE.length];
-  const gpx = new L.GPX('/api/tracks/' + t.id + '/gpx', {
-    async: true,
-    polyline_options: { color: color, weight: 4, opacity: 0.75 },
-    // Hide leaflet-gpx's default start/end markers (avoids missing-icon errors).
-    marker_options: { startIconUrl: '', endIconUrl: '', shadowUrl: '' },
-  });
-  gpx.bindPopup(buildPopup(t));
-  gpx.on('loaded', () => {
-    gpx.addTo(group);
-    if (fitPending) {
-      try {
-        map.fitBounds(group.getBounds().pad(0.15));
-      } catch (_) {}
-    }
-  });
-  document.getElementById('track-list').appendChild(buildListItem(t, color, gpx));
+  const gpx = makeGpxLayer(t, color);
+  const planned = t.kind === 'planned';
+  const list = document.getElementById(planned ? 'planned-list' : 'track-list');
+  list.appendChild(listItem(t, color, gpx, { planned }));
 }
 
 async function loadTracks() {
   const res = await fetch('/api/tracks');
   const tracks = await res.json();
   document.getElementById('track-list').innerHTML = '';
+  document.getElementById('planned-list').innerHTML = '';
   group.clearLayers();
-  document.getElementById('count').textContent = tracks.length;
-  // Only auto-fit on the very first load so we don't yank the map after uploads.
+  document.getElementById('count').textContent = tracks.filter((t) => t.kind !== 'planned').length;
   tracks.forEach(addTrack);
 }
 
-// ---- Upload form ----------------------------------------------------------
+// ===========================================================================
+// Upload form
+// ===========================================================================
 let uploadGated = false;
-
 async function loadConfig() {
   try {
     const cfg = await (await fetch('/api/config')).json();
@@ -146,6 +222,7 @@ async function loadConfig() {
     if (uploadGated) document.getElementById('passphrase-field').hidden = false;
   } catch (_) {}
 }
+if (adminToken) document.getElementById('recommended-field').hidden = false;
 
 const form = document.getElementById('upload-form');
 const msg = document.getElementById('upload-msg');
@@ -153,47 +230,190 @@ const btn = document.getElementById('upload-btn');
 
 form.addEventListener('submit', async (e) => {
   e.preventDefault();
-  msg.textContent = '';
-  msg.className = 'msg';
+  msg.textContent = ''; msg.className = 'msg';
   btn.disabled = true;
   try {
     const data = new FormData(form);
-    const res = await fetch('/api/tracks', { method: 'POST', body: data });
+    const headers = {};
+    if (adminToken) headers['x-admin-token'] = adminToken;
+    const res = await fetch('/api/tracks', { method: 'POST', body: data, headers });
     if (res.ok) {
-      const rec = await res.json();
-      msg.textContent = 'アップロード完了 / Uploaded ✓';
-      msg.className = 'msg ok';
-      // Keep the chosen color & passphrase; clear the rest.
+      msg.textContent = 'アップロード完了 / Uploaded ✓'; msg.className = 'msg ok';
       const color = form.color.value;
-      const pass = uploadGated ? form.passphrase.value : '';
       form.reset();
       form.color.value = color;
-      if (uploadGated) form.passphrase.value = pass;
-      fitPending = false; // don't snap the map away from where the user is looking
-      addTrack(rec, parseInt(document.getElementById('count').textContent, 10));
-      const c = document.getElementById('count');
-      c.textContent = parseInt(c.textContent, 10) + 1;
+      fitPending = false;
+      loadTracks();
     } else {
       const err = await res.json().catch(() => ({}));
-      msg.textContent = err.error || 'Upload failed (' + res.status + ')';
-      msg.className = 'msg err';
+      msg.textContent = err.error || 'Upload failed (' + res.status + ')'; msg.className = 'msg err';
     }
-  } catch (err) {
-    msg.textContent = 'Network error. Please retry.';
-    msg.className = 'msg err';
+  } catch (_) {
+    msg.textContent = 'Network error. Please retry.'; msg.className = 'msg err';
   } finally {
     btn.disabled = false;
   }
 });
 
-// ---- Mobile panel toggle --------------------------------------------------
+// ===========================================================================
+// Route planner (click waypoints -> snap to trails via BRouter -> save)
+// ===========================================================================
+const planner = {
+  active: false,
+  waypoints: [],   // L.LatLng
+  markers: [],     // L.CircleMarker
+  preview: null,   // L.Polyline
+  resolved: [],    // [[lon,lat,ele?], ...] final route geometry
+};
+
+const plannerBar = document.getElementById('planner-bar');
+const planStatus = document.getElementById('plan-status');
+
+function setPlanStatus(txt) { planStatus.textContent = txt; }
+
+function enterPlanner() {
+  planner.active = true;
+  plannerBar.hidden = false;
+  document.body.classList.add('planning');
+  map.getContainer().style.cursor = 'crosshair';
+  setPlanStatus('地図をクリックして点を追加 / Click the map to add points');
+}
+
+function exitPlanner() {
+  planner.active = false;
+  plannerBar.hidden = true;
+  document.body.classList.remove('planning');
+  map.getContainer().style.cursor = '';
+  clearPlanner();
+}
+
+function clearPlanner() {
+  planner.waypoints = [];
+  planner.markers.forEach((m) => map.removeLayer(m));
+  planner.markers = [];
+  if (planner.preview) { map.removeLayer(planner.preview); planner.preview = null; }
+  planner.resolved = [];
+  if (planner.active) setPlanStatus('地図をクリックして点を追加 / Click the map to add points');
+}
+
+map.on('click', (e) => {
+  if (!planner.active) return;
+  planner.waypoints.push(e.latlng);
+  const m = L.circleMarker(e.latlng, { radius: 5, color: '#ff00aa', weight: 2, fillOpacity: 1 }).addTo(map);
+  planner.markers.push(m);
+  recomputeRoute();
+});
+
+async function snapToTrails(latlngs) {
+  const lonlats = latlngs.map((p) => p.lng.toFixed(6) + ',' + p.lat.toFixed(6)).join('|');
+  const url =
+    'https://brouter.de/brouter?lonlats=' + lonlats +
+    '&profile=hiking-beta&alternativeidx=0&format=geojson';
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('BRouter ' + res.status);
+  const gj = await res.json();
+  const coords = gj.features && gj.features[0] && gj.features[0].geometry.coordinates;
+  if (!coords || !coords.length) throw new Error('no route');
+  return coords; // [[lon,lat,(ele)], ...]
+}
+
+function drawPreview(latlngsForLine, resolvedCoords) {
+  if (planner.preview) map.removeLayer(planner.preview);
+  planner.preview = L.polyline(latlngsForLine, {
+    color: '#ff00aa', weight: 4, opacity: 0.9, dashArray: '4,6',
+  }).addTo(map);
+  planner.resolved = resolvedCoords;
+  // distance
+  let d = 0;
+  for (let i = 1; i < latlngsForLine.length; i++) d += latlngsForLine[i - 1].distanceTo(latlngsForLine[i]);
+  setPlanStatus((d / 1000).toFixed(2) + ' km · ' + planner.waypoints.length + ' pts');
+}
+
+let recomputeSeq = 0;
+async function recomputeRoute() {
+  if (planner.waypoints.length < 2) {
+    if (planner.preview) { map.removeLayer(planner.preview); planner.preview = null; }
+    planner.resolved = planner.waypoints.map((p) => [p.lng, p.lat]);
+    return;
+  }
+  const snap = document.getElementById('snap-trails').checked;
+  const seq = ++recomputeSeq;
+  if (!snap) {
+    drawPreview(planner.waypoints.slice(), planner.waypoints.map((p) => [p.lng, p.lat]));
+    return;
+  }
+  setPlanStatus('trail探索中… / routing…');
+  try {
+    const coords = await snapToTrails(planner.waypoints);
+    if (seq !== recomputeSeq) return; // a newer request superseded this one
+    const latlngs = coords.map((c) => L.latLng(c[1], c[0]));
+    drawPreview(latlngs, coords);
+  } catch (err) {
+    if (seq !== recomputeSeq) return;
+    // Fall back to straight segments so planning still works off-trail / offline.
+    drawPreview(planner.waypoints.slice(), planner.waypoints.map((p) => [p.lng, p.lat]));
+    setPlanStatus('trail探索失敗→直線 / routing failed, straight line');
+  }
+}
+
+document.getElementById('btn-plan').addEventListener('click', () => {
+  if (planner.active) exitPlanner(); else enterPlanner();
+});
+document.getElementById('plan-cancel').addEventListener('click', exitPlanner);
+document.getElementById('plan-clear').addEventListener('click', clearPlanner);
+document.getElementById('plan-undo').addEventListener('click', () => {
+  planner.waypoints.pop();
+  const m = planner.markers.pop();
+  if (m) map.removeLayer(m);
+  recomputeRoute();
+});
+document.getElementById('snap-trails').addEventListener('change', recomputeRoute);
+
+document.getElementById('plan-save').addEventListener('click', async () => {
+  if (planner.resolved.length < 2) { alert('2点以上をクリックしてください / Add at least 2 points.'); return; }
+  const name = prompt('ルート名 / Route name:', '');
+  if (!name) return;
+  const gpx = coordsToGpx(planner.resolved, name);
+  const data = new FormData();
+  data.append('kind', 'planned');
+  data.append('name', name);
+  data.append('color', '#f5a623');
+  data.append('gpx', new Blob([gpx], { type: 'application/gpx+xml' }), 'route.gpx');
+  const headers = {};
+  if (adminToken) {
+    headers['x-admin-token'] = adminToken;
+    if (confirm('★ 推奨ルートにしますか？ / Mark as recommended?')) data.append('recommended', 'true');
+  }
+  if (uploadGated) {
+    const pass = prompt('合言葉 / Passphrase:');
+    if (pass) data.append('passphrase', pass);
+  }
+  setPlanStatus('保存中… / saving…');
+  const res = await fetch('/api/tracks', { method: 'POST', body: data, headers });
+  if (res.ok) { exitPlanner(); fitPending = false; loadTracks(); }
+  else {
+    const e = await res.json().catch(() => ({}));
+    alert(e.error || 'Save failed'); setPlanStatus('保存失敗 / save failed');
+  }
+});
+
+// ===========================================================================
+// 3D view: hand the current map bounds to the terrain viewer
+// ===========================================================================
+document.getElementById('btn-3d').addEventListener('click', (e) => {
+  e.preventDefault();
+  const b = map.getBounds();
+  const q = 'w=' + b.getWest().toFixed(5) + '&s=' + b.getSouth().toFixed(5) +
+            '&e=' + b.getEast().toFixed(5) + '&n=' + b.getNorth().toFixed(5);
+  window.open('/terrain.html?' + q, '_blank', 'noopener');
+});
+
+// ===========================================================================
+// Mobile panel toggle + go
+// ===========================================================================
 document.getElementById('panel-toggle').addEventListener('click', () => {
   document.body.classList.toggle('panel-open');
 });
 
-// ---- Go --------------------------------------------------------------------
 loadConfig();
-// fitPending stays true through the initial load so the map auto-fits to all
-// tracks as their GPX data arrives. The upload handler sets it false so new
-// uploads don't yank the map away from where the user is looking.
 loadTracks();

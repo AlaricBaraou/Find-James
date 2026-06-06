@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>3D地形 / 3D Terrain — 捜索マップ</title>
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0e14;
+      font-family: system-ui, -apple-system, "Noto Sans JP", sans-serif; color: #e7ebf3; }
+    #c { display: block; width: 100%; height: 100%; }
+    #hud {
+      position: absolute; top: 12px; left: 12px; z-index: 10;
+      background: rgba(28,33,44,0.9); border: 1px solid #3a4252; border-radius: 10px;
+      padding: 12px 14px; font-size: 13px; max-width: 280px;
+    }
+    #hud h1 { font-size: 15px; margin: 0 0 8px; }
+    #hud a { color: #4f8cff; }
+    #hud label { display: block; margin: 10px 0 4px; color: #9aa4b6; font-size: 12px; }
+    #hud input[type=range] { width: 100%; }
+    #status { margin-top: 8px; font-size: 12px; color: #9aa4b6; min-height: 1.2em; }
+    #status.err { color: #ff7a7a; }
+    .legend { margin-top: 8px; font-size: 11px; color: #9aa4b6; line-height: 1.5; }
+    #hud.min { padding: 8px; }
+    #toggle { position: absolute; top: 12px; right: 12px; z-index: 10;
+      background: rgba(28,33,44,0.9); border: 1px solid #3a4252; color: #e7ebf3;
+      border-radius: 8px; padding: 8px 10px; cursor: pointer; }
+  </style>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <canvas id="c"></canvas>
+  <div id="hud">
+    <h1>⛰ 3D地形 / 3D Terrain</h1>
+    <div>ドラッグで回転・スクロールでズーム<br>Drag to orbit · scroll to zoom</div>
+    <label>高さ強調 / Vertical exaggeration: <span id="exag-val">1.7</span>×</label>
+    <input type="range" id="exag" min="1" max="4" step="0.1" value="1.7" />
+    <label>表面 / Surface</label>
+    <select id="surface">
+      <option value="seamlessphoto">写真 / Satellite</option>
+      <option value="relief">色別標高 / Relief</option>
+      <option value="std">標準 / Standard</option>
+      <option value="pale">淡色 / Pale</option>
+    </select>
+    <div id="status">読み込み中… / loading…</div>
+    <div class="legend">— 捜索済み searched · ┄ 計画 planned<br>
+      <a href="/">← 2D地図に戻る / back to 2D map</a></div>
+  </div>
+  <button id="toggle">▢</button>
+  <script type="module" src="/terrain.js"></script>
+</body>
+</html>

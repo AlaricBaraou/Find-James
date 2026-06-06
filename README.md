@@ -11,9 +11,18 @@ which Japanese searchers will recognise, including topo, pale, relief and satell
 ## Features
 
 - **Open GPX upload** — name, date, searcher, notes, colour. No account needed.
+- **Searched vs planned tracks** — completed searches render solid; planned routes dashed.
 - **All tracks on one map**; overlapping lines show repeatedly-covered ground, blanks show gaps.
-- **Japanese + English** interface.
-- **Mobile friendly** for use in the field.
+- **Trail-aware route planner** — click waypoints on the map and the route snaps to real
+  OSM trails via [BRouter](https://brouter.de/) (`hiking` profile, no API key), then saves
+  as a planned route. Falls back to straight segments off-trail.
+- **Claim a route** — volunteers claim a planned route (`open → claimed → completed`) so
+  people stop duplicating effort; status is live on the map for everyone.
+- **Recommended routes** — admins can flag planned routes as ★ recommended.
+- **3D terrain view** — a three.js viewer builds an elevation mesh from GSI DEM tiles,
+  drapes satellite/relief imagery, and projects the tracks onto the terrain. Great for
+  understanding ridgelines and valleys in mountain searches.
+- **Japanese + English** interface, **mobile friendly** for field use.
 - **Security built in**: file-type & size validation, upload rate-limiting, secure
   headers, an optional upload passphrase, and a token-gated delete for moderation.
 
@@ -73,6 +82,21 @@ attach a persistent disk mounted at the path you set as `DATA_DIR` (e.g. `/data`
 > ⚠️ **Ephemeral filesystems** (e.g. some free tiers) lose uploaded files on
 > redeploy/restart. For long-running searches, use a persistent volume, or migrate
 > storage to an object store (S3/R2) later.
+
+## 3D terrain & the GSI proxy
+
+The 3D view (`/terrain.html`) fetches **GSI DEM elevation tiles** and imagery. GSI tiles
+don't send CORS headers, which would taint WebGL textures and block DEM `fetch()`, so the
+server proxies them **same-origin** at `/api/gsi/:layer/:z/:x/:y`. This means:
+
+> The 3D view requires the **server** to have outbound access to
+> `cyberjapandata.gsi.go.jp`. If the host blocks egress, the 3D view shows flat terrain
+> with a notice; the 2D map is unaffected (it loads GSI directly in the browser).
+
+The route planner calls **BRouter** directly from the browser (`brouter.de`), so it needs
+client-side outbound access only.
+
+> ⚠️ **Status:** the planner and 3D viewer are v1 and best-tuned in a real browser.
 
 ## Data & privacy
 

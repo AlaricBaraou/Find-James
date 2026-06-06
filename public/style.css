@@ -170,6 +170,81 @@ button[type=submit]:disabled { opacity: 0.6; cursor: wait; }
 
 .hint { font-size: 11px; color: var(--muted); margin: 10px 0 0; line-height: 1.5; }
 
+/* Header action buttons */
+.actions { display: flex; gap: 8px; margin-bottom: 12px; }
+.actions button, .actions a {
+  flex: 1;
+  text-align: center;
+  padding: 8px 6px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+}
+.actions button:hover, .actions a:hover { border-color: var(--accent); }
+
+/* Kind toggle (searched vs planned) */
+.kind-toggle { display: flex; gap: 12px; margin-bottom: 10px; font-size: 12px; }
+.kind-toggle label { margin: 0; color: var(--text); display: flex; align-items: center; gap: 4px; }
+label.check { display: flex; align-items: center; gap: 6px; color: var(--text); }
+label.check input { width: auto; }
+
+/* Recommended highlight */
+.track-item.recommended .name { color: #ffd166; font-weight: 600; }
+.dot.planned { border: 2px dashed #fff6; }
+
+/* Claim actions under a planned item */
+.claim-actions { display: flex; gap: 6px; flex-basis: 100%; margin: 4px 0 2px 20px; }
+.claim-actions button {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 11px;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+.claim-actions .claim { background: #2a7d4f; border-color: #2a7d4f; }
+.claim-actions .done { background: var(--accent); border-color: var(--accent); }
+.track-item { flex-wrap: wrap; }
+
+/* Planner toolbar */
+#planner-bar {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  max-width: 94vw;
+  padding: 8px 12px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  font-size: 12px;
+}
+#planner-bar .pb-title { font-weight: 600; }
+#planner-bar .pb-snap { display: flex; align-items: center; gap: 4px; color: var(--muted); }
+#planner-bar button {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-2);
+  color: var(--text);
+  padding: 5px 10px;
+  cursor: pointer;
+}
+#planner-bar button.primary { background: var(--accent); border-color: var(--accent); }
+#planner-bar .pb-status { color: var(--muted); min-width: 120px; }
+body.planning #panel { opacity: 0.96; }
+
 #panel footer { font-size: 11px; color: var(--muted); }
 #panel footer a { color: var(--accent); }
 

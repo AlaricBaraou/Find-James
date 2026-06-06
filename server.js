@@ -56,6 +56,14 @@ function clampStr(v, n) {
   return String(v == null ? '' : v).slice(0, n);
 }
 
+function isAdmin(req) {
+  return Boolean(ADMIN_TOKEN) && req.get('x-admin-token') === ADMIN_TOKEN;
+}
+
+function isTrue(v) {
+  return v === 'true' || v === '1' || v === true;
+}
+
 // ---- API ------------------------------------------------------------------
 
 // Public config for the frontend (does not leak secrets).
@@ -97,9 +105,11 @@ app.post('/api/tracks', uploadLimiter, upload.single('gpx'), (req, res) => {
   fs.writeFileSync(path.join(GPX_DIR, file), req.file.buffer);
 
   const color = /^#[0-9a-fA-F]{6}$/.test(req.body.color || '') ? req.body.color : null;
+  const kind = req.body.kind === 'planned' ? 'planned' : 'searched';
   const rec = {
     id,
     file,
+    kind,
     name: clampStr(req.body.name, 120) || 'Untitled track',
     date: clampStr(req.body.date, 40),
     uploader: clampStr(req.body.uploader, 80),
@@ -107,8 +117,50 @@ app.post('/api/tracks', uploadLimiter, upload.single('gpx'), (req, res) => {
     color,
     createdAt: new Date().toISOString(),
   };
+  if (kind === 'planned') {
+    rec.status = 'open'; // open -> claimed -> completed
+    rec.claimedBy = '';
+    rec.claimedAt = '';
+    // Only admins can mark a planned route as officially "recommended".
+    rec.recommended = isAdmin(req) && isTrue(req.body.recommended);
+  }
   store.add(rec);
   res.status(201).json(rec);
+});
+
+// ---- Planned-route lifecycle (claim / release / complete) -----------------
+// Open by design: volunteers identify themselves by name, mirroring open uploads.
+function plannedOnly(req, res) {
+  const t = store.get(req.params.id);
+  if (!t || t.kind !== 'planned') {
+    res.status(404).json({ error: 'planned route not found' });
+    return null;
+  }
+  return t;
+}
+
+app.post('/api/tracks/:id/claim', (req, res) => {
+  const t = plannedOnly(req, res);
+  if (!t) return;
+  if (t.status === 'claimed') {
+    return res.status(409).json({ error: 'Already claimed by ' + (t.claimedBy || 'someone') + '.' });
+  }
+  const by = clampStr(req.body.by, 80);
+  if (!by) return res.status(400).json({ error: 'Please provide a name.' });
+  res.json(store.update(t.id, { status: 'claimed', claimedBy: by, claimedAt: new Date().toISOString() }));
+});
+
+app.post('/api/tracks/:id/release', (req, res) => {
+  const t = plannedOnly(req, res);
+  if (!t) return;
+  res.json(store.update(t.id, { status: 'open', claimedBy: '', claimedAt: '' }));
+});
+
+app.post('/api/tracks/:id/complete', (req, res) => {
+  const t = plannedOnly(req, res);
+  if (!t) return;
+  const by = clampStr(req.body.by, 80) || t.claimedBy;
+  res.json(store.update(t.id, { status: 'completed', completedBy: by, completedAt: new Date().toISOString() }));
 });
 
 app.delete('/api/tracks/:id', (req, res) => {
@@ -124,6 +176,40 @@ app.delete('/api/tracks/:id', (req, res) => {
   }
   store.remove(req.params.id);
   res.json({ ok: true });
+});
+
+// ---- GSI tile / DEM proxy --------------------------------------------------
+// GSI tiles don't send CORS headers, which taints WebGL/canvas textures in the
+// 3D viewer and blocks fetch() of DEM tiles. Proxying them same-origin fixes
+// both. Only used by the 3D view; 2D Leaflet loads GSI directly.
+const GSI_LAYERS = {
+  std: 'png',
+  pale: 'png',
+  relief: 'png',
+  seamlessphoto: 'jpg',
+  dem: 'txt', // DEM10B elevation, z<=14
+  dem5a: 'txt', // 5m mesh, z<=15 (limited coverage)
+};
+
+app.get('/api/gsi/:layer/:z/:x/:y', async (req, res) => {
+  const { layer, z, x, y } = req.params;
+  const ext = GSI_LAYERS[layer];
+  if (!ext) return res.status(400).json({ error: 'unknown layer' });
+  if (![z, x, y].every((n) => /^\d+$/.test(n))) {
+    return res.status(400).json({ error: 'bad tile coords' });
+  }
+  const url = `https://cyberjapandata.gsi.go.jp/xyz/${layer}/${z}/${x}/${y}.${ext}`;
+  try {
+    const r = await fetch(url);
+    if (!r.ok) return res.status(r.status).end();
+    const buf = Buffer.from(await r.arrayBuffer());
+    res.set('Access-Control-Allow-Origin', '*');
+    res.set('Cache-Control', 'public, max-age=604800');
+    res.type(ext === 'txt' ? 'text/plain' : ext === 'jpg' ? 'image/jpeg' : 'image/png');
+    res.send(buf);
+  } catch (e) {
+    res.status(502).json({ error: 'tile fetch failed' });
+  }
 });
 
 // ---- Static frontend ------------------------------------------------------

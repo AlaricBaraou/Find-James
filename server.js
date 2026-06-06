@@ -4,11 +4,14 @@ const express = require('express');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const multer = require('multer');
+const cookieParser = require('cookie-parser');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 
 const store = require('./lib/store');
+const { collection } = require('./lib/collection');
+const { setupAuth } = require('./lib/auth');
 
 // ---- Config (all via env, with safe defaults) -----------------------------
 const PORT = parseInt(process.env.PORT || '3000', 10);
@@ -30,8 +33,13 @@ const SEARCH_LON = parseFloat(process.env.SEARCH_LON || '135.82');
 const SEARCH_ZOOM = parseInt(process.env.SEARCH_ZOOM || '12', 10);
 const SEARCH_AREA_NAME = process.env.SEARCH_AREA_NAME || '比叡山周辺 / Mt. Hiei area';
 
+// Optional anonymous group-chat link (e.g. a LINE OpenChat) for real-time
+// coordination. Surfaced in the UI when set.
+const GROUP_CHAT_URL = process.env.GROUP_CHAT_URL || '';
+
 fs.mkdirSync(GPX_DIR, { recursive: true });
 store.init(DATA_DIR);
+const messages = collection(DATA_DIR, 'messages');
 
 // ---- App ------------------------------------------------------------------
 const app = express();
@@ -41,6 +49,10 @@ app.set('trust proxy', 1); // correct client IPs behind a host's proxy (rate lim
 // every origin. Other helmet protections stay on.
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(express.json({ limit: '64kb' }));
+app.use(cookieParser());
+
+// Passwordless magic-link auth (no-op until SMTP is configured).
+const auth = setupAuth(app, { dataDir: DATA_DIR });
 
 const uploadLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -78,6 +90,8 @@ app.get('/api/config', (req, res) => {
   res.json({
     uploadGated: Boolean(UPLOAD_PASSPHRASE),
     maxFileBytes: MAX_FILE_BYTES,
+    authEnabled: auth.enabled,
+    groupChatUrl: GROUP_CHAT_URL,
     search: {
       lat: SEARCH_LAT,
       lon: SEARCH_LON,
@@ -88,7 +102,7 @@ app.get('/api/config', (req, res) => {
 });
 
 app.get('/api/tracks', (req, res) => {
-  res.json(store.list());
+  res.json(store.list().map(publicTrack));
 });
 
 app.get('/api/tracks/:id/gpx', (req, res) => {
@@ -130,6 +144,12 @@ app.post('/api/tracks', uploadLimiter, upload.single('gpx'), (req, res) => {
     color,
     createdAt: new Date().toISOString(),
   };
+  // Attach a verified owner when the uploader is signed in (enables contact).
+  const owner = auth.getUser(req);
+  if (owner) {
+    rec.ownerId = owner.id;
+    if (!rec.uploader) rec.uploader = owner.nickname;
+  }
   if (kind === 'planned') {
     rec.status = 'open'; // open -> claimed -> completed
     rec.claimedBy = '';
@@ -138,8 +158,15 @@ app.post('/api/tracks', uploadLimiter, upload.single('gpx'), (req, res) => {
     rec.recommended = isAdmin(req) && isTrue(req.body.recommended);
   }
   store.add(rec);
-  res.status(201).json(rec);
+  res.status(201).json(publicTrack(rec));
 });
+
+// Strip internal fields (ownerId/claimedById) before sending tracks to clients,
+// and expose a simple `contactable` flag.
+function publicTrack(t) {
+  const { ownerId, claimedById, ...rest } = t;
+  return { ...rest, contactable: Boolean(ownerId || claimedById) };
+}
 
 // ---- Planned-route lifecycle (claim / release / complete) -----------------
 // Open by design: volunteers identify themselves by name, mirroring open uploads.
@@ -158,22 +185,96 @@ app.post('/api/tracks/:id/claim', (req, res) => {
   if (t.status === 'claimed') {
     return res.status(409).json({ error: 'Already claimed by ' + (t.claimedBy || 'someone') + '.' });
   }
-  const by = clampStr(req.body.by, 80);
+  const u = auth.getUser(req);
+  const by = clampStr(req.body.by, 80) || (u && u.nickname);
   if (!by) return res.status(400).json({ error: 'Please provide a name.' });
-  res.json(store.update(t.id, { status: 'claimed', claimedBy: by, claimedAt: new Date().toISOString() }));
+  const patch = { status: 'claimed', claimedBy: by, claimedAt: new Date().toISOString() };
+  if (u) patch.claimedById = u.id;
+  res.json(publicTrack(store.update(t.id, patch)));
 });
 
 app.post('/api/tracks/:id/release', (req, res) => {
   const t = plannedOnly(req, res);
   if (!t) return;
-  res.json(store.update(t.id, { status: 'open', claimedBy: '', claimedAt: '' }));
+  res.json(publicTrack(store.update(t.id, { status: 'open', claimedBy: '', claimedAt: '', claimedById: '' })));
 });
 
 app.post('/api/tracks/:id/complete', (req, res) => {
   const t = plannedOnly(req, res);
   if (!t) return;
-  const by = clampStr(req.body.by, 80) || t.claimedBy;
-  res.json(store.update(t.id, { status: 'completed', completedBy: by, completedAt: new Date().toISOString() }));
+  const u = auth.getUser(req);
+  const by = clampStr(req.body.by, 80) || (u && u.nickname) || t.claimedBy;
+  res.json(publicTrack(store.update(t.id, { status: 'completed', completedBy: by, completedAt: new Date().toISOString() })));
+});
+
+// ---- Per-route message threads (contact / team up) ------------------------
+const msgLimiter = rateLimit({ windowMs: 10 * 60 * 1000, max: 60, standardHeaders: true, legacyHeaders: false });
+
+function baseUrl(req) {
+  const pub = (process.env.PUBLIC_URL || '').replace(/\/$/, '');
+  return pub || req.protocol + '://' + req.get('host');
+}
+
+app.get('/api/tracks/:id/messages', auth.requireUser, (req, res) => {
+  const t = store.get(req.params.id);
+  if (!t) return res.status(404).json({ error: 'not found' });
+  const thread = messages
+    .filter((m) => m.trackId === t.id)
+    .sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1))
+    .map((m) => ({ id: m.id, fromNick: m.fromNick, body: m.body, createdAt: m.createdAt, mine: m.fromId === req.user.id }));
+  res.json({ track: { id: t.id, name: t.name }, messages: thread });
+});
+
+app.post('/api/tracks/:id/messages', msgLimiter, auth.requireUser, async (req, res) => {
+  const t = store.get(req.params.id);
+  if (!t) return res.status(404).json({ error: 'not found' });
+  const body = clampStr(req.body && req.body.body, 1000).trim();
+  if (!body) return res.status(400).json({ error: 'Empty message.' });
+
+  const msg = messages.add({
+    id: crypto.randomUUID(),
+    trackId: t.id,
+    fromId: req.user.id,
+    fromNick: req.user.nickname || 'someone',
+    body,
+    createdAt: new Date().toISOString(),
+  });
+
+  // Email nudge to the route's owner/claimer (no addresses or message body
+  // exposed to anyone). Best-effort; never block the request.
+  const stakeholders = new Set([t.ownerId, t.claimedById].filter(Boolean));
+  stakeholders.delete(req.user.id);
+  for (const uid of stakeholders) {
+    const u = auth.users.get(uid);
+    if (!u || !u.email) continue;
+    auth
+      .sendMail(
+        u.email,
+        '新しいメッセージ / New message — 捜索マップ',
+        (req.user.nickname || 'A volunteer') + ' さんがルート「' + t.name + '」にメッセージを送りました。\n' +
+          'A volunteer messaged you about route "' + t.name + '".\n\n' +
+          'ログインして確認 / Sign in to read:\n' + baseUrl(req) + '/\n'
+      )
+      .catch(() => {});
+  }
+  res.status(201).json({ id: msg.id, fromNick: msg.fromNick, body: msg.body, createdAt: msg.createdAt, mine: true });
+});
+
+app.get('/api/inbox', auth.requireUser, (req, res) => {
+  const me = req.user.id;
+  const myTrackIds = new Set(store.list().filter((t) => t.ownerId === me || t.claimedById === me).map((t) => t.id));
+  messages.filter((m) => m.fromId === me).forEach((m) => myTrackIds.add(m.trackId));
+  const threads = [];
+  for (const tid of myTrackIds) {
+    const t = store.get(tid);
+    if (!t) continue;
+    const thread = messages.filter((m) => m.trackId === tid).sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
+    if (!thread.length) continue;
+    const last = thread[thread.length - 1];
+    threads.push({ trackId: tid, name: t.name, count: thread.length, lastBody: last.body, lastAt: last.createdAt, lastNick: last.fromNick });
+  }
+  threads.sort((a, b) => (a.lastAt < b.lastAt ? 1 : -1));
+  res.json({ threads });
 });
 
 app.delete('/api/tracks/:id', (req, res) => {

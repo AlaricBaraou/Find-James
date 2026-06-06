@@ -22,9 +22,16 @@ which Japanese searchers will recognise, including topo, pale, relief and satell
 - **3D terrain view** — a three.js viewer builds an elevation mesh from GSI DEM tiles,
   drapes satellite/relief imagery, and projects the tracks onto the terrain. Great for
   understanding ridgelines and valleys in mountain searches.
+- **Optional anonymous sign-in + contact** — passwordless **magic-link email** login
+  (your email is only used to send the link; everyone else sees a chosen nickname). Each
+  route gets a **contact thread** so volunteers can team up ("I'll do that ridge with
+  you"); the owner/claimer gets an email nudge that reveals no address or message body.
+  An optional **group-chat link** (e.g. LINE OpenChat) can be surfaced for real-time
+  coordination. All of this stays dormant until SMTP is configured — uploads remain open.
 - **Japanese + English** interface, **mobile friendly** for field use.
 - **Security built in**: file-type & size validation, upload rate-limiting, secure
-  headers, an optional upload passphrase, and a token-gated delete for moderation.
+  headers, an optional upload passphrase, a token-gated delete for moderation, and
+  httpOnly + SameSite session cookies for sign-in.
 
 ## Run locally
 
@@ -48,6 +55,12 @@ All optional — see `.env.example`.
 | `SEARCH_AREA_NAME` | _(unset)_ | Label shown in the panel header |
 | `UPLOAD_PASSPHRASE` | _(unset)_ | If set, uploaders must enter this. Leave unset for fully-open uploads |
 | `ADMIN_TOKEN` | _(unset)_ | Required to delete tracks. If unset, deletion is disabled |
+| `MAIL_SMTP_URL` | _(unset)_ | SMTP transport (`smtps://user:pass@host:port`). **Enables sign-in.** Unset = auth off |
+| `MAIL_FROM` | _(localhost)_ | From-address for sign-in emails |
+| `PUBLIC_URL` | _(inferred)_ | Base URL used to build magic-links — set in production |
+| `COOKIE_SECURE` | auto | `1` to force HTTPS-only session cookies |
+| `AUTH_DEV_ECHO` | _(off)_ | Local testing only: returns the magic link in the API response. **Never in production** |
+| `GROUP_CHAT_URL` | _(unset)_ | Optional anonymous group-chat link shown in the UI |
 
 ### Moderating / deleting tracks
 
@@ -64,6 +77,16 @@ A ✕ delete button appears next to each track. The token stays in the URL fragm
 
 If open uploads get abused, set `UPLOAD_PASSPHRASE` and redeploy. The upload form
 will show a passphrase field automatically. No code change required.
+
+### Turning on sign-in & contact
+
+Auth is **off by default** — the site works fully anonymously. To enable it, point
+`MAIL_SMTP_URL` at any email provider (Resend, Postmark, Mailgun, SendGrid, Gmail
+SMTP…), set `MAIL_FROM` and `PUBLIC_URL`, and redeploy. Then a **Sign in** button
+appears: a volunteer enters their email, clicks the link, picks a nickname, and can
+use the per-route **Contact** threads. Uploads/claims made while signed in are tied to
+that nickname so others can reach them. To test locally without a mailbox, run with
+`AUTH_DEV_ECHO=1` (the link comes back in the API response).
 
 ## Deploy (when you're back at a computer)
 
@@ -104,8 +127,11 @@ client-side outbound access only.
 ## Data & privacy
 
 GPX tracks reveal where searchers walked — which is the point here. Uploaded files
-and the `tracks.json` index live under `DATA_DIR` and are never committed to git.
+and all JSON state (`tracks`, `users`, `sessions`, `messages`) live under `DATA_DIR`
+and are never committed to git. Emails are stored only to send login links and are
+never exposed to other users; contact threads show only nicknames.
 
 ## Tech
 
-Express · Multer · Helmet · express-rate-limit · Leaflet · leaflet-gpx · GSI Japan tiles.
+Express · Multer · Helmet · express-rate-limit · cookie-parser · Nodemailer ·
+Leaflet · leaflet-gpx · three.js · GSI Japan tiles · BRouter.

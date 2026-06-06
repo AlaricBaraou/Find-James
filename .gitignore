@@ -2,8 +2,8 @@ node_modules/
 .env
 *.log
 
-# Uploaded data — keep the folders, ignore their contents.
+# Uploaded data + accounts/messages — keep the folders, ignore their contents.
 data/gpx/*
 !data/gpx/.gitkeep
-data/tracks.json
-data/tracks.json.tmp
+data/*.json
+data/*.json.tmp

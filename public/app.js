@@ -32,6 +32,11 @@ L.control.layers(baseLayers, {}, { collapsed: true, position: 'topright' }).addT
 const group = L.featureGroup().addTo(map); // searched + planned route layers
 let fitPending = true;
 
+// Auth + contact state (populated from /api/config and /api/auth/me).
+let me = null;
+let authEnabled = false;
+let groupChatUrl = '';
+
 // Admin mode via URL hash: #admin=YOUR_TOKEN
 let adminToken = null;
 (function () {
@@ -148,6 +153,7 @@ function listItem(t, color, gpxLayer, opts) {
   const item = el('li', { className: 'track-item' + (t.recommended ? ' recommended' : '') }, [cb, dot, meta]);
 
   if (opts && opts.planned) appendPlannedActions(item, t);
+  appendContact(item, t);
 
   if (adminToken) {
     const del = el('button', { className: 'del', title: 'Delete', textContent: '✕' });
@@ -219,7 +225,14 @@ async function loadConfig() {
   try {
     const cfg = await (await fetch('/api/config')).json();
     uploadGated = cfg.uploadGated;
+    authEnabled = Boolean(cfg.authEnabled);
+    groupChatUrl = cfg.groupChatUrl || '';
     if (uploadGated) document.getElementById('passphrase-field').hidden = false;
+    if (groupChatUrl) {
+      const chat = document.getElementById('btn-chat');
+      chat.href = groupChatUrl;
+      chat.hidden = false;
+    }
     if (cfg.search && Number.isFinite(cfg.search.lat) && Number.isFinite(cfg.search.lon)) {
       // Frame the configured search area, unless tracks have already auto-fit.
       if (fitPending) map.setView([cfg.search.lat, cfg.search.lon], cfg.search.zoom || 12);
@@ -228,6 +241,7 @@ async function loadConfig() {
         if (lbl) lbl.textContent = '📍 ' + cfg.search.name;
       }
     }
+    renderAuthbar();
   } catch (_) {}
 }
 if (adminToken) document.getElementById('recommended-field').hidden = false;
@@ -423,5 +437,172 @@ document.getElementById('panel-toggle').addEventListener('click', () => {
   document.body.classList.toggle('panel-open');
 });
 
-loadConfig();
-loadTracks();
+// ===========================================================================
+// Authentication (magic-link) + per-route contact threads
+// ===========================================================================
+const modal = document.getElementById('modal');
+const modalBody = document.getElementById('modal-body');
+function openModal(node) { modalBody.innerHTML = ''; modalBody.appendChild(node); modal.hidden = false; }
+function closeModal() { modal.hidden = true; modalBody.innerHTML = ''; }
+document.getElementById('modal-x').addEventListener('click', closeModal);
+modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !modal.hidden) closeModal(); });
+
+function renderAuthbar() {
+  const bar = document.getElementById('authbar');
+  bar.innerHTML = '';
+  if (!authEnabled) { bar.hidden = true; return; }
+  bar.hidden = false;
+  if (me) {
+    const who = el('span', { className: 'who-label', title: '表示名を変更 / change name' }, ['👤 ' + (me.nickname || '名前未設定 / set name')]);
+    who.addEventListener('click', openNickname);
+    const inbox = el('button', { className: 'link-btn' }, ['📨 受信箱 / Inbox']);
+    inbox.addEventListener('click', openInbox);
+    const out = el('button', { className: 'link-btn' }, ['ログアウト / Logout']);
+    out.addEventListener('click', async () => {
+      await fetch('/api/auth/logout', { method: 'POST' });
+      me = null; renderAuthbar(); loadTracks();
+    });
+    bar.append(who, inbox, out);
+  } else {
+    const inb = el('button', { className: 'modal-primary small' }, ['ログイン / Sign in']);
+    inb.addEventListener('click', openSignin);
+    bar.appendChild(inb);
+  }
+}
+
+async function loadMe() {
+  try { me = (await (await fetch('/api/auth/me')).json()).user; } catch (_) { me = null; }
+  renderAuthbar();
+  if (me && !me.hasNickname) openNickname();
+  if (location.search.includes('setname')) history.replaceState({}, '', location.pathname);
+}
+
+function openSignin() {
+  const email = el('input', { type: 'email', placeholder: 'you@example.com', className: 'modal-input', autocomplete: 'email' });
+  const status = el('p', { className: 'msg' });
+  const send = el('button', { className: 'modal-primary' }, ['ログインリンクを送る / Send sign-in link']);
+  send.addEventListener('click', async () => {
+    status.className = 'msg'; status.textContent = '送信中… / sending…';
+    try {
+      const res = await fetch('/api/auth/request', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.value.trim() }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok) {
+        status.className = 'msg ok';
+        if (d.devLink) {
+          status.textContent = '';
+          status.appendChild(el('a', { href: d.devLink }, ['（開発用）クリックしてログイン / Dev: click to sign in']));
+        } else {
+          status.textContent = 'メールを確認してください / Check your email for the link.';
+        }
+      } else { status.className = 'msg err'; status.textContent = d.error || 'Failed.'; }
+    } catch (_) { status.className = 'msg err'; status.textContent = 'Network error.'; }
+  });
+  email.addEventListener('keydown', (e) => { if (e.key === 'Enter') send.click(); });
+  openModal(el('div', {}, [
+    el('h3', {}, ['ログイン / Sign in']),
+    el('p', { className: 'muted' }, ['匿名でOK。メールはログインリンク専用で、他の人には表示されません。 Anonymous — your email is only used to send the link and is never shown to others.']),
+    email, send, status,
+  ]));
+  email.focus();
+}
+
+function openNickname() {
+  const input = el('input', { type: 'text', maxLength: 40, className: 'modal-input', placeholder: '例: 北班A / e.g. North-team', value: (me && me.nickname) || '' });
+  const status = el('p', { className: 'msg' });
+  const save = el('button', { className: 'modal-primary' }, ['保存 / Save']);
+  save.addEventListener('click', async () => {
+    try {
+      const res = await fetch('/api/auth/nickname', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nickname: input.value.trim() }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok) { me.nickname = d.nickname; me.hasNickname = true; renderAuthbar(); closeModal(); loadTracks(); }
+      else { status.className = 'msg err'; status.textContent = d.error || 'Failed.'; }
+    } catch (_) { status.className = 'msg err'; status.textContent = 'Network error.'; }
+  });
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') save.click(); });
+  openModal(el('div', {}, [
+    el('h3', {}, ['表示名 / Display name']),
+    el('p', { className: 'muted' }, ['地図上で表示される匿名のニックネーム。 The anonymous nickname others will see on the map.']),
+    input, save, status,
+  ]));
+  input.focus();
+}
+
+function appendContact(item, t) {
+  if (!authEnabled) return;
+  let box = item.querySelector('.claim-actions');
+  if (!box) { box = el('div', { className: 'claim-actions' }); item.appendChild(box); }
+  const c = el('button', { className: 'contact' }, ['連絡 / Contact']);
+  c.addEventListener('click', () => { if (!me) openSignin(); else openThread(t); });
+  box.appendChild(c);
+}
+
+async function openThread(t) {
+  const list = el('div', { className: 'thread' });
+  const ta = el('textarea', { className: 'modal-input', rows: 2, placeholder: 'メッセージ / Message…' });
+  const status = el('p', { className: 'msg' });
+  const send = el('button', { className: 'modal-primary' }, ['送信 / Send']);
+  async function refresh() {
+    const res = await fetch('/api/tracks/' + t.id + '/messages');
+    if (res.status === 401) { closeModal(); openSignin(); return; }
+    const d = await res.json();
+    list.innerHTML = '';
+    if (!d.messages.length) list.appendChild(el('p', { className: 'muted' }, ['まだメッセージはありません / No messages yet.']));
+    d.messages.forEach((m) => {
+      list.appendChild(el('div', { className: 'msg-row' + (m.mine ? ' mine' : '') }, [
+        el('span', { className: 'who' }, [m.mine ? 'あなた / You' : m.fromNick]),
+        el('div', { className: 'mbody' }, [m.body]),
+      ]));
+    });
+    list.scrollTop = list.scrollHeight;
+  }
+  send.addEventListener('click', async () => {
+    const body = ta.value.trim(); if (!body) return;
+    send.disabled = true; status.textContent = '';
+    try {
+      const res = await fetch('/api/tracks/' + t.id + '/messages', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body }),
+      });
+      if (res.ok) { ta.value = ''; refresh(); }
+      else { const e = await res.json().catch(() => ({})); status.className = 'msg err'; status.textContent = e.error || 'Failed.'; }
+    } catch (_) { status.className = 'msg err'; status.textContent = 'Network error.'; }
+    finally { send.disabled = false; }
+  });
+  openModal(el('div', {}, [
+    el('h3', {}, ['連絡 / Contact — ' + (t.name || '')]),
+    el('p', { className: 'muted' }, ['このルートの担当者・作成者に届きます。電話番号やメールは共有されません。 Reaches the route owner/claimer. No phone or email is shared.']),
+    list, ta, send, status,
+  ]));
+  refresh();
+}
+
+async function openInbox() {
+  const res = await fetch('/api/inbox');
+  if (res.status === 401) { openSignin(); return; }
+  const d = await res.json();
+  const list = el('div', { className: 'thread' });
+  if (!d.threads.length) list.appendChild(el('p', { className: 'muted' }, ['メッセージはありません / No messages.']));
+  d.threads.forEach((th) => {
+    const row = el('button', { className: 'inbox-row' }, [
+      el('div', { className: 'name' }, [th.name + '  (' + th.count + ')']),
+      el('div', { className: 'mbody' }, [th.lastNick + ': ' + th.lastBody]),
+    ]);
+    row.addEventListener('click', () => openThread({ id: th.trackId, name: th.name }));
+    list.appendChild(row);
+  });
+  openModal(el('div', {}, [el('h3', {}, ['📨 受信箱 / Inbox']), list]));
+}
+
+// ===========================================================================
+// Boot
+// ===========================================================================
+loadConfig().then(() => {
+  loadTracks();
+  loadMe();
+});

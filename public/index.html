@@ -33,6 +33,8 @@
         <button type="button" id="btn-plan">＋ ルート計画 / Plan a route</button>
         <a id="btn-3d" href="/terrain.html" target="_blank" rel="noopener">⛰ 3D表示 / 3D view</a>
       </div>
+      <a id="btn-chat" class="chat-link" target="_blank" rel="noopener" hidden>💬 グループチャット / Group chat</a>
+      <div class="authbar" id="authbar"></div>
     </header>
 
     <section class="block">
@@ -92,6 +94,14 @@
       ルート探索 / routing: <a href="https://brouter.de/" target="_blank" rel="noopener">BRouter</a> · OSM</p>
     </footer>
   </aside>
+
+  <!-- Reusable modal (sign-in, nickname, message threads, inbox) -->
+  <div id="modal" class="modal" hidden>
+    <div class="modal-card">
+      <button class="modal-x" id="modal-x" type="button" aria-label="Close">✕</button>
+      <div id="modal-body"></div>
+    </div>
+  </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
           integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>

@@ -172,11 +172,14 @@ app.post('/api/tracks', uploadLimiter, upload.single('gpx'), (req, res) => {
   const createdAt = new Date().toISOString();
   const date = extractGpxDate(req.file.buffer) || jstDate(createdAt);
   const kind = req.body.kind === 'planned' ? 'planned' : 'searched';
+  // category drives the colour: searcher = red, other (found online) = blue.
+  const category = req.body.category === 'other' ? 'other' : 'searcher';
   const rec = {
     id,
     file,
     kind,
-    name: '捜索 / Search',
+    category,
+    name: category === 'other' ? 'その他 / Other' : '捜索 / Search',
     date,
     email: clampStr(req.body.email, 120),
     notes: clampStr(req.body.notes, 1000),

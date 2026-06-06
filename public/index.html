@@ -27,6 +27,10 @@
       <h2>GPXをアップロード<span>Upload a track</span></h2>
       <p class="hint" style="margin-top:0">日付はGPXから自動取得します。<br>The date is read from the GPX automatically.</p>
       <form id="upload-form">
+        <div class="kind-toggle">
+          <label><input type="radio" name="category" value="searcher" checked /> 🔴 捜索者 / Search team</label>
+          <label><input type="radio" name="category" value="other" /> 🔵 その他 / Other (online)</label>
+        </div>
         <label>メール / Email (optional)
           <input name="email" type="email" maxlength="120" placeholder="連絡先 / for the organisers to reach you" autocomplete="email" />
         </label>
@@ -46,6 +50,9 @@
 
     <section class="block">
       <h2>捜索ログ<span>Tracks (<span id="count">0</span>)</span></h2>
+      <p class="hint" style="margin-top:0">
+        <span style="color:#e60026">●</span> 捜索者 / search team&nbsp;&nbsp;
+        <span style="color:#1e6fff">●</span> その他 / other (online)</p>
       <ul id="track-list" class="track-list"></ul>
       <p class="hint">線が重なる場所＝複数回捜索済み。空白＝未捜索の可能性。<br>
         Overlaps = searched repeatedly. Blanks = likely gaps.</p>

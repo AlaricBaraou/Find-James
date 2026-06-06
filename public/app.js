@@ -14,10 +14,9 @@ const TILES = [
   { url: 'https://cyberjapandata.gsi.go.jp/xyz/relief/{z}/{x}/{y}.png', name: '色別標高 Relief', max: 15 },
 ];
 
-// Our colour code. For now every track is red; later we can branch by
-// status/age/team here in one place.
-const TRACK_COLORS = { default: '#e60026' };
-function colorFor(t) { return (t && t.color) || TRACK_COLORS.default; }
+// Our colour code: red = search-team track, blue = other (found online).
+const TRACK_COLORS = { searcher: '#e60026', other: '#1e6fff' };
+function colorFor(t) { return (t && t.color) || TRACK_COLORS[t && t.category] || TRACK_COLORS.searcher; }
 
 const map = L.map('map', { zoomControl: true }).setView([35.055, 135.82], 12); // Mt. Hiei
 

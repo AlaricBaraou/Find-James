@@ -97,28 +97,25 @@ function jstDate(iso) {
   }
 }
 
-// Parse a GPX buffer with @tmcw/togeojson and pull out a display name and the
-// first track timestamp (as a JST date). Returns {} on unparseable input.
-function extractGpxMeta(buf) {
-  let name = '';
-  let time = '';
+// Parse a GPX buffer with @tmcw/togeojson and return the first track timestamp
+// as a JST date. We deliberately do NOT read the GPX <name>, which can carry the
+// uploader's activity title / handle (personal info). Returns '' if no time.
+function extractGpxDate(buf) {
   try {
     const dom = new DOMParser({ onError: () => {} }).parseFromString(buf.toString('utf8'), 'text/xml');
     const geo = togeojson.gpx(dom);
     for (const f of geo.features || []) {
       const p = f.properties || {};
-      if (!name && p.name) name = String(p.name);
-      if (!time) {
-        if (p.time) time = p.time;
-        else if (p.coordinateProperties && p.coordinateProperties.times) {
-          const flat = [p.coordinateProperties.times].flat(Infinity).filter(Boolean);
-          if (flat.length) time = flat[0];
-        }
+      let time = '';
+      if (p.time) time = p.time;
+      else if (p.coordinateProperties && p.coordinateProperties.times) {
+        const flat = [p.coordinateProperties.times].flat(Infinity).filter(Boolean);
+        if (flat.length) time = flat[0];
       }
-      if (name && time) break;
+      if (time) return jstDate(time);
     }
   } catch (_) {}
-  return { name: name.trim().slice(0, 120), date: time ? jstDate(time) : '' };
+  return '';
 }
 
 // ---- API ------------------------------------------------------------------
@@ -170,20 +167,20 @@ app.post('/api/tracks', uploadLimiter, upload.single('gpx'), (req, res) => {
   const file = id + '.gpx';
   fs.writeFileSync(path.join(GPX_DIR, file), req.file.buffer);
 
-  // Trust the GPX for the name and date; the form only supplies email + notes.
-  const meta = extractGpxMeta(req.file.buffer);
+  // Trust the GPX for the date only. The GPX name is intentionally ignored to
+  // avoid leaking the uploader's info; the label is a neutral one + the date.
   const createdAt = new Date().toISOString();
-  const color = /^#[0-9a-fA-F]{6}$/.test(req.body.color || '') ? req.body.color : null;
+  const date = extractGpxDate(req.file.buffer) || jstDate(createdAt);
   const kind = req.body.kind === 'planned' ? 'planned' : 'searched';
   const rec = {
     id,
     file,
     kind,
-    name: meta.name || (meta.date ? '捜索 / Search ' + meta.date : 'トラック / Track'),
-    date: meta.date || jstDate(createdAt),
+    name: '捜索 / Search',
+    date,
     email: clampStr(req.body.email, 120),
     notes: clampStr(req.body.notes, 1000),
-    color,
+    color: null, // colour is decided client-side by our colour code
     createdAt,
   };
   // Attach a verified owner when the uploader is signed in (enables contact).

@@ -14,11 +14,10 @@ const TILES = [
   { url: 'https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg', name: '写真 Satellite', max: 18 },
 ];
 
-const PALETTE = [
-  '#e6194b', '#3cb44b', '#4363d8', '#f58231', '#911eb4',
-  '#469990', '#f032e6', '#9a6324', '#000075', '#808000',
-  '#42d4f4', '#bfef45', '#fabed4', '#dcbeff', '#aaffc3',
-];
+// Our colour code. For now every track is red; later we can branch by
+// status/age/team here in one place.
+const TRACK_COLORS = { default: '#e60026' };
+function colorFor(t) { return (t && t.color) || TRACK_COLORS.default; }
 
 const map = L.map('map', { zoomControl: true }).setView([35.055, 135.82], 12); // Mt. Hiei
 
@@ -112,8 +111,8 @@ function listItem(t, color, gpxLayer) {
   return item;
 }
 
-function addTrack(t, idx) {
-  const color = t.color || PALETTE[idx % PALETTE.length];
+function addTrack(t) {
+  const color = colorFor(t);
   const gpx = makeGpxLayer(t, color);
   document.getElementById('track-list').appendChild(listItem(t, color, gpx));
 }

@@ -365,7 +365,11 @@ app.get('/api/gsi/:layer/:z/:x/:y', async (req, res) => {
 });
 
 // ---- Static frontend ------------------------------------------------------
-app.use(express.static(path.join(__dirname, 'public')));
+// no-cache = browsers may store but must revalidate (cheap 304s), so a normal
+// reload always picks up the latest HTML/JS/CSS during active development.
+app.use(express.static(path.join(__dirname, 'public'), {
+  setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache'),
+}));
 
 // ---- Error handling (e.g. file too large) ---------------------------------
 app.use((err, req, res, next) => {

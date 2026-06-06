@@ -13,6 +13,14 @@
 
   <button id="panel-toggle" type="button" aria-label="Toggle panel">☰</button>
 
+  <!-- Always-visible map legend (incl. on mobile) -->
+  <div id="map-legend" aria-label="凡例 / Legend">
+    <div class="lg-row"><span class="lg-line red"></span>捜索 / Search team</div>
+    <div class="lg-row"><span class="lg-line blue"></span>その他 / Other (online)</div>
+    <div class="lg-row"><span class="lg-area"></span>警察捜索済み / Police (approx.)</div>
+    <div class="lg-row"><span class="lg-pin"></span>最終目撃 / Last seen</div>
+  </div>
+
   <section id="missing-banner" class="missing-banner" aria-labelledby="missing-title">
     <button id="missing-toggle" class="missing-summary" type="button" aria-expanded="false" aria-controls="missing-details">
       <img src="/assets/weston-higginbotham.jpg" alt="" />

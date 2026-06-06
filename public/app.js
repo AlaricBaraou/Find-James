@@ -56,6 +56,44 @@ L.marker([LAST_SEEN.lat, LAST_SEEN.lon], {
   )
   .addTo(map);
 
+// Approximate public reporting map of the area already searched by police.
+// Source image: Newsweek / Google Maps screenshot. Treat as approximate context,
+// not an authoritative operational boundary.
+const POLICE_SEARCHED_AREA = [
+  [34.9934, 135.8051],
+  [34.9951, 135.8014],
+  [35.0002, 135.7978],
+  [35.0065, 135.7990],
+  [35.0112, 135.8047],
+  [35.0140, 135.8120],
+  [35.0142, 135.8212],
+  [35.0106, 135.8286],
+  [35.0040, 135.8325],
+  [34.9971, 135.8312],
+  [34.9929, 135.8242],
+  [34.9915, 135.8150],
+  [34.9920, 135.8088],
+];
+L.polygon(POLICE_SEARCHED_AREA, {
+  color: '#ff6b35',
+  weight: 3,
+  opacity: 0.95,
+  fillColor: '#ff6b35',
+  fillOpacity: 0.14,
+  dashArray: '8,6',
+})
+  .bindTooltip('警察捜索済み範囲（概略） / Police searched area (approx.)', {
+    permanent: false,
+    direction: 'top',
+    className: 'police-search-tooltip',
+  })
+  .bindPopup(
+    '<strong>警察捜索済み範囲（概略） / Police searched area (approx.)</strong><br>' +
+    'Newsweek掲載画像をもとにした目安です。<br>' +
+    'Approximate area based on a publicly reported Newsweek map image.'
+  )
+  .addTo(map);
+
 // Admin mode (delete buttons) via URL hash: #admin=YOUR_TOKEN
 let adminToken = null;
 (function () {

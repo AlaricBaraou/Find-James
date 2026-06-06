@@ -27,6 +27,13 @@ if (![west, south, east, north].every(Number.isFinite)) {
   // Default to the Mount Hiei massif (Kyoto ⟷ Lake Biwa ridge).
   west = 135.77; east = 135.88; south = 35.01; north = 35.10;
 }
+// The 2D map bounds can be tight around the current viewport. Add extra
+// north/south context so the 3D slab does not cut off nearby ridges/tracks.
+{
+  const padLat = Math.max(0.015, (north - south) * 0.35);
+  south -= padLat;
+  north += padLat;
+}
 // Guard against absurdly large boxes (keep tile counts sane).
 if (east - west > 0.6) { const c = (east + west) / 2; west = c - 0.3; east = c + 0.3; }
 if (north - south > 0.5) { const c = (north + south) / 2; south = c - 0.25; north = c + 0.25; }
@@ -258,11 +265,12 @@ function worldPos(lon, lat, lift) {
 // ===========================================================================
 // Tracks overlay
 // ===========================================================================
-const TRACK_RADIUS = Math.max(10, Math.min(45, worldSize / 550));
-const TRACK_LIFT = Math.max(18, TRACK_RADIUS * 2.2);
+const TRACK_RADIUS = Math.max(6, Math.min(28, worldSize / 850));
+const TRACK_LIFT = Math.max(7, TRACK_RADIUS * 1.15);
 const DASH_SIZE = Math.max(70, worldSize / 120);
 const DASH_GAP = DASH_SIZE * 0.75;
 const trackObjs = []; // { mesh, pts: [[lon,lat]], planned, color }
+const TRACK_COLORS = { searcher: '#e60026', other: '#1e6fff' };
 
 function parseGpx(xml) {
   const doc = new DOMParser().parseFromString(xml, 'application/xml');
@@ -275,10 +283,8 @@ function parseGpx(xml) {
   return out;
 }
 
-function trackColor(t, idx) {
-  if (t.color) return new THREE.Color(t.color);
-  const pal = [0xe6194b, 0x3cb44b, 0x4363d8, 0xf58231, 0x911eb4, 0x42d4f4, 0xf032e6];
-  return new THREE.Color(pal[idx % pal.length]);
+function trackColor(t) {
+  return new THREE.Color((t && t.color) || TRACK_COLORS[t && t.category] || TRACK_COLORS.searcher);
 }
 
 async function loadTracks() {
@@ -291,7 +297,7 @@ async function loadTracks() {
       const pts = parseGpx(xml);
       if (pts.length < 2) continue;
       const planned = t.kind === 'planned';
-      const color = planned && t.status === 'claimed' ? new THREE.Color(0x4363d8) : trackColor(t, i);
+      const color = trackColor(t);
       const obj = { mesh: null, pts, planned, color };
       setTrackHeights(obj);
       trackObjs.push(obj);
@@ -380,11 +386,13 @@ function frameCamera() {
     if (terrainMesh.geometry.boundingSphere) radius = Math.max(radius, terrainMesh.geometry.boundingSphere.radius);
   }
   camera.near = Math.max(0.5, radius / 12000);
-  camera.far = Math.max(60000, radius * 8);
+  camera.far = Math.max(60000, radius * 12);
+  scene.fog.near = Math.max(radius * 1.6, 4000);
+  scene.fog.far = Math.max(radius * 7, 16000);
   controls.target.set(0, 0, 0);
   controls.minDistance = Math.max(20, radius * 0.03);
   controls.maxDistance = radius * 6;
-  camera.position.set(0, radius * 1.15, radius * 1.95);
+  camera.position.set(0, radius * 0.82, radius * 1.38);
   camera.updateProjectionMatrix();
   controls.update();
 }

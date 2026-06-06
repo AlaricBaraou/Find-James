@@ -1,16 +1,17 @@
-FROM node:20-alpine
+FROM node:22-alpine
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm install --omit=dev
+RUN npm ci --omit=dev
 
 COPY . .
 
 ENV PORT=3000
 ENV DATA_DIR=/data
+ENV NODE_ENV=production
 EXPOSE 3000
 
-# Persist uploads on a mounted volume.
+# Persist uploads + metadata on a mounted volume.
 VOLUME ["/data"]
 
 CMD ["node", "server.js"]

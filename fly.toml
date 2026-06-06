@@ -1,0 +1,33 @@
+# Fly.io deployment. Edit `app` to your chosen name, then:
+#   fly launch --no-deploy        # (or `fly apps create <name>`)
+#   fly volumes create find_james_data --region nrt --size 1
+#   fly deploy
+app = "find-james"
+primary_region = "nrt"  # Tokyo — closest to searchers in Japan
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "3000"
+  DATA_DIR = "/data"
+  NODE_ENV = "production"
+  SEARCH_AREA_NAME = "比叡山周辺 / Mt. Hiei area"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 1  # keep one warm so shared links don't cold-start
+
+[[mounts]]
+  source = "find_james_data"
+  destination = "/data"
+
+[[http_service.checks]]
+  method = "get"
+  path = "/healthz"
+  interval = "30s"
+  timeout = "5s"
+  grace_period = "10s"

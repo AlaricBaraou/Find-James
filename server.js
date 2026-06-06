@@ -120,6 +120,9 @@ function extractGpxDate(buf) {
 
 // ---- API ------------------------------------------------------------------
 
+// Health check for the hosting platform.
+app.get('/healthz', (req, res) => res.json({ ok: true }));
+
 // Public config for the frontend (does not leak secrets).
 app.get('/api/config', (req, res) => {
   res.json({

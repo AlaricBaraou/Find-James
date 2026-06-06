@@ -188,4 +188,24 @@ document.getElementById('panel-toggle').addEventListener('click', () => {
   document.body.classList.toggle('panel-open');
 });
 
+// ---- Missing-person banner ------------------------------------------------
+const missingToggle = document.getElementById('missing-toggle');
+const missingDetails = document.getElementById('missing-details');
+const missingClose = document.getElementById('missing-close');
+
+function setMissingOpen(open) {
+  missingDetails.hidden = !open;
+  missingToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+
+missingToggle.addEventListener('click', () => {
+  setMissingOpen(missingDetails.hidden);
+});
+missingClose.addEventListener('click', () => {
+  setMissingOpen(false);
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !missingDetails.hidden) setMissingOpen(false);
+});
+
 loadConfig().then(loadTracks);

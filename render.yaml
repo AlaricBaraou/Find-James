@@ -1,0 +1,21 @@
+# Render.com Blueprint. In the Render dashboard: New > Blueprint, point it at this
+# repo/branch. The Starter plan (or higher) is required for a persistent disk.
+services:
+  - type: web
+    name: find-james
+    runtime: docker
+    region: singapore  # closest Render region to Japan
+    plan: starter      # persistent disk needs a paid instance
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: DATA_DIR
+        value: /data
+      - key: NODE_ENV
+        value: production
+      - key: SEARCH_AREA_NAME
+        value: "比叡山周辺 / Mt. Hiei area"
+    disk:
+      name: data
+      mountPath: /data
+      sizeGB: 1

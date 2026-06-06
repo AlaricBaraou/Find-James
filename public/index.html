@@ -115,7 +115,9 @@
           <input name="passphrase" type="password" autocomplete="off" />
         </label>
         <label class="file">GPXファイル / GPX file
+          <span class="privacy-tip" tabindex="0" aria-label="Privacy note: we keep only coordinates and one date from your GPX. Names, timestamps, device metadata, and activity details are removed.">?</span>
           <input name="gpx" type="file" accept=".gpx,application/gpx+xml,application/xml,text/xml" required />
+          <span class="privacy-note">保存するのは座標と日付のみ。GPX内の名前・時刻列・端末情報は削除されます。<br>We keep only coordinates and one date; names, timestamp history, device metadata, and activity details are removed.</span>
         </label>
         <button type="submit" id="upload-btn">アップロード / Upload</button>
         <p id="upload-msg" class="msg" role="status"></p>

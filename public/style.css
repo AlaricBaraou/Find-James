@@ -127,6 +127,31 @@ input[type=color] {
   background: #1c212c;
 }
 label.file input { margin-top: 4px; font-size: 12px; }
+.privacy-tip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-left: 4px;
+  border: 1px solid var(--accent);
+  border-radius: 50%;
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: help;
+}
+.privacy-note {
+  display: block;
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.privacy-tip:hover + input + .privacy-note,
+.privacy-tip:focus + input + .privacy-note {
+  color: #c8d4ea;
+}
 textarea { resize: vertical; }
 
 button[type=submit] {

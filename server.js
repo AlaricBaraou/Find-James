@@ -14,6 +14,7 @@ const crypto = require('crypto');
 const store = require('./lib/store');
 const { collection } = require('./lib/collection');
 const { setupAuth } = require('./lib/auth');
+const s3 = require('./lib/s3sync');
 
 // ---- Config (all via env, with safe defaults) -----------------------------
 const PORT = parseInt(process.env.PORT || '3000', 10);
@@ -42,6 +43,15 @@ const GROUP_CHAT_URL = process.env.GROUP_CHAT_URL || '';
 fs.mkdirSync(GPX_DIR, { recursive: true });
 store.init(DATA_DIR);
 const messages = collection(DATA_DIR, 'messages');
+
+// Durability mirror (Fly Tigris / any S3). Local volume is the working copy;
+// every change is also written off-box, and restored on boot if the volume is empty.
+s3.init();
+const TRACKS_JSON = path.join(DATA_DIR, 'tracks.json');
+async function mirrorTracks() {
+  try { await s3.putFile('tracks.json', TRACKS_JSON); }
+  catch (e) { console.error('s3 mirror tracks.json failed:', e.message); }
+}
 
 // ---- App ------------------------------------------------------------------
 const app = express();
@@ -105,10 +115,13 @@ function jstDate(iso) {
 // Parse a GPX buffer with @tmcw/togeojson and return the first track timestamp
 // as a JST date. We deliberately do NOT read the GPX <name>, which can carry the
 // uploader's activity title / handle (personal info). Returns '' if no time.
-function extractGpxDate(buf) {
+function parseGpx(buf) {
+  const dom = new DOMParser({ onError: () => {} }).parseFromString(buf.toString('utf8'), 'text/xml');
+  return togeojson.gpx(dom);
+}
+
+function extractGpxDate(geo) {
   try {
-    const dom = new DOMParser({ onError: () => {} }).parseFromString(buf.toString('utf8'), 'text/xml');
-    const geo = togeojson.gpx(dom);
     for (const f of geo.features || []) {
       const p = f.properties || {};
       let time = '';
@@ -121,6 +134,42 @@ function extractGpxDate(buf) {
     }
   } catch (_) {}
   return '';
+}
+
+function collectCoordinates(geo) {
+  const out = [];
+  function addLine(coords) {
+    const line = [];
+    for (const c of coords || []) {
+      const lon = Number(c[0]);
+      const lat = Number(c[1]);
+      if (Number.isFinite(lon) && Number.isFinite(lat)) line.push([lon, lat]);
+    }
+    if (line.length >= 2) out.push(line);
+  }
+
+  for (const f of geo.features || []) {
+    const g = f && f.geometry;
+    if (!g) continue;
+    if (g.type === 'LineString') addLine(g.coordinates);
+    else if (g.type === 'MultiLineString') (g.coordinates || []).forEach(addLine);
+  }
+  return out;
+}
+
+function sanitizedGpx(lines) {
+  const segs = lines
+    .map((line) =>
+      '<trkseg>' +
+      line.map((c) => '<trkpt lat="' + c[1].toFixed(7) + '" lon="' + c[0].toFixed(7) + '"></trkpt>').join('') +
+      '</trkseg>'
+    )
+    .join('');
+  return (
+    '<?xml version="1.0" encoding="UTF-8"?>' +
+    '<gpx version="1.1" creator="find-james-sanitized" xmlns="http://www.topografix.com/GPX/1/1">' +
+    '<trk>' + segs + '</trk></gpx>'
+  );
 }
 
 // ---- API ------------------------------------------------------------------
@@ -159,7 +208,7 @@ app.get('/api/tracks/:id/gpx', readLimiter, (req, res) => {
   res.type('application/gpx+xml').sendFile(fp);
 });
 
-app.post('/api/tracks', uploadLimiter, upload.single('gpx'), (req, res) => {
+app.post('/api/tracks', uploadLimiter, upload.single('gpx'), async (req, res) => {
   if (UPLOAD_PASSPHRASE) {
     const provided = req.get('x-upload-passphrase') || req.body.passphrase || '';
     if (provided !== UPLOAD_PASSPHRASE) {
@@ -171,14 +220,26 @@ app.post('/api/tracks', uploadLimiter, upload.single('gpx'), (req, res) => {
     return res.status(400).json({ error: 'That does not look like a GPX file.' });
   }
 
+  let geo;
+  let lines;
+  try {
+    geo = parseGpx(req.file.buffer);
+    lines = collectCoordinates(geo);
+  } catch (_) {
+    return res.status(400).json({ error: 'That GPX file could not be parsed.' });
+  }
+  if (!lines.length) {
+    return res.status(400).json({ error: 'No usable GPX track points were found.' });
+  }
+
   const id = crypto.randomUUID();
   const file = id + '.gpx';
-  fs.writeFileSync(path.join(GPX_DIR, file), req.file.buffer);
+  fs.writeFileSync(path.join(GPX_DIR, file), sanitizedGpx(lines));
 
   // Trust the GPX for the date only. The GPX name is intentionally ignored to
   // avoid leaking the uploader's info; the label is a neutral one + the date.
   const createdAt = new Date().toISOString();
-  const date = extractGpxDate(req.file.buffer) || jstDate(createdAt);
+  const date = extractGpxDate(geo) || jstDate(createdAt);
   const kind = req.body.kind === 'planned' ? 'planned' : 'searched';
   // category drives the colour: searcher = red, other (found online) = blue.
   const category = req.body.category === 'other' ? 'other' : 'searcher';
@@ -205,6 +266,12 @@ app.post('/api/tracks', uploadLimiter, upload.single('gpx'), (req, res) => {
     rec.recommended = isAdmin(req) && isTrue(req.body.recommended);
   }
   store.add(rec);
+  try {
+    await s3.putFile('gpx/' + file, path.join(GPX_DIR, file));
+    await mirrorTracks();
+  } catch (e) {
+    console.error('s3 mirror (upload) failed:', e.message);
+  }
   res.status(201).json(publicTrack(rec, true));
 });
 
@@ -228,7 +295,7 @@ function plannedOnly(req, res) {
   return t;
 }
 
-app.post('/api/tracks/:id/claim', (req, res) => {
+app.post('/api/tracks/:id/claim', async (req, res) => {
   const t = plannedOnly(req, res);
   if (!t) return;
   if (t.status === 'claimed') {
@@ -239,21 +306,27 @@ app.post('/api/tracks/:id/claim', (req, res) => {
   if (!by) return res.status(400).json({ error: 'Please provide a name.' });
   const patch = { status: 'claimed', claimedBy: by, claimedAt: new Date().toISOString() };
   if (u) patch.claimedById = u.id;
-  res.json(publicTrack(store.update(t.id, patch)));
+  const updated = store.update(t.id, patch);
+  await mirrorTracks();
+  res.json(publicTrack(updated));
 });
 
-app.post('/api/tracks/:id/release', (req, res) => {
+app.post('/api/tracks/:id/release', async (req, res) => {
   const t = plannedOnly(req, res);
   if (!t) return;
-  res.json(publicTrack(store.update(t.id, { status: 'open', claimedBy: '', claimedAt: '', claimedById: '' })));
+  const updated = store.update(t.id, { status: 'open', claimedBy: '', claimedAt: '', claimedById: '' });
+  await mirrorTracks();
+  res.json(publicTrack(updated));
 });
 
-app.post('/api/tracks/:id/complete', (req, res) => {
+app.post('/api/tracks/:id/complete', async (req, res) => {
   const t = plannedOnly(req, res);
   if (!t) return;
   const u = auth.getUser(req);
   const by = clampStr(req.body.by, 80) || (u && u.nickname) || t.claimedBy;
-  res.json(publicTrack(store.update(t.id, { status: 'completed', completedBy: by, completedAt: new Date().toISOString() })));
+  const updated = store.update(t.id, { status: 'completed', completedBy: by, completedAt: new Date().toISOString() });
+  await mirrorTracks();
+  res.json(publicTrack(updated));
 });
 
 // ---- Per-route message threads (contact / team up) ------------------------
@@ -326,7 +399,7 @@ app.get('/api/inbox', auth.requireUser, (req, res) => {
   res.json({ threads });
 });
 
-app.delete('/api/tracks/:id', (req, res) => {
+app.delete('/api/tracks/:id', async (req, res) => {
   if (!ADMIN_TOKEN || req.get('x-admin-token') !== ADMIN_TOKEN) {
     return res.status(401).json({ error: 'unauthorized' });
   }
@@ -338,6 +411,8 @@ app.delete('/api/tracks/:id', (req, res) => {
     /* file may already be gone */
   }
   store.remove(req.params.id);
+  try { await s3.del('gpx/' + t.file); await mirrorTracks(); }
+  catch (e) { console.error('s3 mirror (delete) failed:', e.message); }
   res.json({ ok: true });
 });
 
@@ -396,8 +471,33 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Server error' });
 });
 
-app.listen(PORT, () => {
-  console.log('Find James search map listening on http://localhost:' + PORT);
-  console.log('  uploads:', UPLOAD_PASSPHRASE ? 'gated (passphrase set)' : 'OPEN');
-  console.log('  deletion:', ADMIN_TOKEN ? 'enabled (admin token set)' : 'disabled');
-});
+// Restore from the durability mirror before serving, then start listening.
+(async () => {
+  try {
+    if (s3.enabled() && !fs.existsSync(TRACKS_JSON)) {
+      const n = await s3.restoreAll(DATA_DIR);
+      console.log('s3sync: volume was empty — restored ' + n + ' object(s) from bucket');
+      store.init(DATA_DIR); // reload restored tracks into memory
+    }
+    if (s3.enabled()) {
+      // Backfill any track files missing locally (partial-loss recovery).
+      for (const t of store.list()) {
+        const fp = path.join(GPX_DIR, t.file);
+        if (!fs.existsSync(fp)) {
+          try { await s3.getToFile('gpx/' + t.file, fp); console.log('s3sync: restored gpx ' + t.file); }
+          catch (_) { /* not in bucket */ }
+        }
+      }
+      mirrorTracks(); // ensure the bucket index reflects current state
+    }
+  } catch (e) {
+    console.error('s3sync boot error:', e.message);
+  }
+
+  app.listen(PORT, () => {
+    console.log('Find James search map listening on http://localhost:' + PORT);
+    console.log('  uploads:', UPLOAD_PASSPHRASE ? 'gated (passphrase set)' : 'OPEN');
+    console.log('  deletion:', ADMIN_TOKEN ? 'enabled (admin token set)' : 'disabled');
+    console.log('  durability:', s3.enabled() ? 'S3 mirror ON (' + process.env.BUCKET_NAME + ')' : 'local only');
+  });
+})();
